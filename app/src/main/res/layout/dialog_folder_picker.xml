@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/black"
+    android:padding="8dp">
+
+    <!-- Header: Path and Up button -->
+    <ImageView
+        android:id="@+id/btnFolderUp"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:padding="6dp"
+        android:src="@drawable/ic_arrow_back_24"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/tvCurrentPath"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:layout_marginEnd="6dp"
+        android:ellipsize="middle"
+        android:maxLines="1"
+        android:textColor="@color/white"
+        android:textSize="11sp"
+        app:layout_constraintBottom_toBottomOf="@+id/btnFolderUp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@+id/btnFolderUp"
+        app:layout_constraintTop_toTopOf="@+id/btnFolderUp"
+        tools:text="/storage/emulated/0/Music" />
+
+    <!-- Subdirectories list -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvFolderPicker"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp"
+        app:layout_constraintBottom_toTopOf="@+id/btnConfirmFolder"
+        app:layout_constraintTop_toBottomOf="@+id/btnFolderUp" />
+
+    <!-- Confirm button -->
+    <Button
+        android:id="@+id/btnConfirmFolder"
+        android:layout_width="match_parent"
+        android:layout_height="34dp"
+        android:background="@drawable/bg_pill_selected"
+        android:text="选择此目录"
+        android:textColor="@color/white"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        app:layout_constraintBottom_toBottomOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

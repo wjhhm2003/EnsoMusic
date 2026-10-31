@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">EnsoMusic</string>
+    <string name="tab_songs">单曲</string>
+    <string name="tab_albums">专辑</string>
+    <string name="tab_artists">歌手</string>
+    <string name="tab_queue">播放队列</string>
+    <string name="tab_folders">扫描目录</string>
+    <string name="no_songs_title">暂无本地音乐</string>
+    <string name="no_songs_desc">点击右上方文件夹图标配置扫描目录并扫描</string>
+    <string name="scan_incremental">增量扫描</string>
+    <string name="scan_full">全量重扫</string>
+    <string name="add_folder">添加目录</string>
+    <string name="battery_whitelist">电池优化白名单 (防杀后台)</string>
+    <string name="unknown_artist">未知歌手</string>
+    <string name="unknown_album">未知专辑</string>
+    <string name="permission_storage_needed">需要读取存储权限以播放本地音乐</string>
+    <string name="grant_permission">授权权限</string>
+</resources>

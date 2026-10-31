@@ -1,0 +1,655 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/black">
+
+    <!-- Top Bar: Segmented Tabs strictly centered across full 502dp width -->
+    <LinearLayout
+        android:id="@+id/layoutTopBar"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:gravity="center"
+        android:orientation="horizontal"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <!-- Tab 1: Songs -->
+        <LinearLayout
+            android:id="@+id/layoutTabSongs"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp">
+
+            <TextView
+                android:id="@+id/tabSongs"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:text="@string/tab_songs"
+                android:textColor="@color/white"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <View
+                android:id="@+id/indicatorSongs"
+                android:layout_width="20dp"
+                android:layout_height="2.5dp"
+                android:layout_marginTop="3dp"
+                android:background="@color/accent_green" />
+        </LinearLayout>
+
+        <!-- Tab 2: Albums -->
+        <LinearLayout
+            android:id="@+id/layoutTabAlbums"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp">
+
+            <TextView
+                android:id="@+id/tabAlbums"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:text="@string/tab_albums"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+
+            <View
+                android:id="@+id/indicatorAlbums"
+                android:layout_width="20dp"
+                android:layout_height="2.5dp"
+                android:layout_marginTop="3dp"
+                android:background="@color/accent_green"
+                android:visibility="invisible" />
+        </LinearLayout>
+
+        <!-- Tab 3: Artists -->
+        <LinearLayout
+            android:id="@+id/layoutTabArtists"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp">
+
+            <TextView
+                android:id="@+id/tabArtists"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:text="@string/tab_artists"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+
+            <View
+                android:id="@+id/indicatorArtists"
+                android:layout_width="20dp"
+                android:layout_height="2.5dp"
+                android:layout_marginTop="3dp"
+                android:background="@color/accent_green"
+                android:visibility="invisible" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Independent Top-Right Scan Button (40dp x 40dp) -->
+    <ImageView
+        android:id="@+id/btnQuickScan"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_marginEnd="6dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="目录扫描"
+        android:padding="8dp"
+        android:src="@drawable/ic_folder_24"
+        app:layout_constraintBottom_toBottomOf="@+id/layoutTopBar"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="@+id/layoutTopBar"
+        app:tint="@color/text_hint" />
+
+    <!-- Alphabet Grid Trigger Button (Above Alphabet Index Bar) -->
+    <ImageView
+        android:id="@+id/btnOpenAlphabetGrid"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
+        android:layout_marginTop="2dp"
+        android:layout_marginEnd="2dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="字母快速检索网格"
+        android:padding="3dp"
+        android:src="@drawable/ic_queue_music_24"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/layoutTopBar"
+        app:tint="@color/text_hint" />
+
+    <!-- Alphabet Index Sidebar (A–Z + #) -->
+    <com.enso.music.ui.view.AlphabetIndexView
+        android:id="@+id/alphabetIndexView"
+        android:layout_width="22dp"
+        android:layout_height="0dp"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="4dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/btnOpenAlphabetGrid" />
+
+    <!-- Main Content List -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvLibrary"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:clipToPadding="false"
+        android:paddingBottom="10dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toStartOf="@+id/alphabetIndexView"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/layoutTopBar" />
+
+    <!-- Center 56dp x 56dp Morandi Green Rounded Bubble -->
+    <TextView
+        android:id="@+id/tvIndexBubble"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:background="@drawable/bg_pill_selected"
+        android:elevation="8dp"
+        android:gravity="center"
+        android:textColor="@color/white"
+        android:textSize="26sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        tools:text="A"
+        tools:visibility="visible" />
+
+    <!-- Empty State -->
+    <LinearLayout
+        android:id="@+id/layoutEmpty"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/layoutTopBar"
+        tools:visibility="visible">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/no_songs_title"
+            android:textColor="@color/white"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:gravity="center"
+            android:text="@string/no_songs_desc"
+            android:textColor="@color/text_hint"
+            android:textSize="10sp" />
+
+        <Button
+            android:id="@+id/btnEmptyScan"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_pill_selected"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="设置目录并扫描"
+            android:textColor="@color/white"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <!-- Large Grid Popup Modal Overlay (7 columns of 48dp x 48dp buttons for A–Z and #) -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/layoutAlphabetGrid"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#F0000000"
+        android:clickable="true"
+        android:elevation="12dp"
+        android:focusable="true"
+        android:visibility="gone"
+        tools:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/layoutAlphabetGridHeader"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="8dp"
+            app:layout_constraintTop_toTopOf="parent">
+
+            <TextView
+                android:id="@+id/tvAlphabetGridTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="快速字母检索"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <ImageView
+                android:id="@+id/btnAlphabetGridClose"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="关闭"
+                android:padding="8dp"
+                android:src="@drawable/ic_delete_24"
+                app:tint="@color/text_secondary" />
+        </LinearLayout>
+
+        <GridLayout
+            android:id="@+id/gridAlphabet"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:alignmentMode="alignMargins"
+            android:columnCount="7"
+            android:rowCount="4"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/layoutAlphabetGridHeader">
+
+            <!-- Row 1: A B C D E F G -->
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="A"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="B"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="C"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="D"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="E"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="F"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="G"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <!-- Row 2: H I J K L M N -->
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="H"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="I"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="J"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="K"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="L"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="M"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="N"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <!-- Row 3: O P Q R S T U -->
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="O"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="P"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="Q"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="R"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="S"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="T"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="U"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <!-- Row 4: V W X Y Z # and empty space/close trigger -->
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="V"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="W"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="X"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="Y"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="Z"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_margin="3dp"
+                android:background="@drawable/bg_card_rounded"
+                android:gravity="center"
+                android:text="#"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+        </GridLayout>
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+    <!-- Drilldown view for Album / Artist details -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/layoutDetail"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/black"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone"
+        tools:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/layoutDetailHeader"
+            android:layout_width="match_parent"
+            android:layout_height="38dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="6dp"
+            android:paddingEnd="8dp"
+            app:layout_constraintTop_toTopOf="parent">
+
+            <ImageView
+                android:id="@+id/btnDetailBack"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="返回"
+                android:padding="8dp"
+                android:src="@drawable/ic_arrow_back_24" />
+
+            <TextView
+                android:id="@+id/tvDetailTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="@color/white"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                tools:text="叶惠美 (周杰伦)" />
+
+            <TextView
+                android:id="@+id/btnDetailPlayAll"
+                android:layout_width="wrap_content"
+                android:layout_height="26dp"
+                android:background="@drawable/bg_pill_selected"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="播放全部"
+                android:textColor="@color/white"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvDetailSongs"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:clipToPadding="false"
+            android:paddingBottom="10dp"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/layoutDetailHeader" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

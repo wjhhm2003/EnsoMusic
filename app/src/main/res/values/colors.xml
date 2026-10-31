@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#000000</color>
+    <color name="card_bg">#141414</color>
+    <color name="card_bg_elevated">#1E1E1E</color>
+    <color name="white">#FFFFFF</color>
+    <color name="text_secondary">#8E8E93</color>
+    <color name="text_hint">#B0B0B5</color>
+    <color name="accent_green">#8CB399</color>
+    <color name="accent_green_highlight">#A3C9B0</color>
+    <color name="accent_green_dim">#A3C9B0</color>
+    <color name="accent_green_indicator">#2ECC71</color>
+    <color name="seekbar_track_bg">#3A3A3C</color>
+    <color name="seekbar_progress">#E5E5EA</color>
+    <color name="border_translucent_white">#40FFFFFF</color>
+    <color name="divider">#222222</color>
+    <color name="error_red">#E53935</color>
+</resources>

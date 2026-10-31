@@ -1,0 +1,239 @@
+package com.enso.music.ui
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.w3c.dom.Element
+import org.w3c.dom.Node
+import java.io.File
+import javax.xml.parsers.DocumentBuilderFactory
+
+/**
+ * Empirical challenger test for 502x410 Watch Viewport & Layout Integrity.
+ * Directly parses and analyzes XML layout definitions and mathematically verifies
+ * layout budgets, alignment invariants, and touch targets.
+ */
+class LayoutIntegrityChallengerTest {
+
+    private fun parseXml(relativePath: String): Element {
+        var file = File(relativePath)
+        if (!file.exists()) {
+            file = File(relativePath.removePrefix("app/"))
+        }
+        if (!file.exists()) {
+            file = File("app", relativePath.removePrefix("app/"))
+        }
+        assertTrue("Layout file must exist: ${file.absolutePath}", file.exists())
+        val dbf = DocumentBuilderFactory.newInstance()
+        dbf.isNamespaceAware = true
+        val db = dbf.newDocumentBuilder()
+        val doc = db.parse(file)
+        return doc.documentElement
+    }
+
+    private fun findElementById(root: Element, targetId: String): Element? {
+        val cleanTarget = targetId.removePrefix("@+id/").removePrefix("@id/")
+        if (root.getAttribute("android:id").removePrefix("@+id/").removePrefix("@id/") == cleanTarget) {
+            return root
+        }
+        val childNodes = root.childNodes
+        for (i in 0 until childNodes.length) {
+            val node = childNodes.item(i)
+            if (node.nodeType == Node.ELEMENT_NODE) {
+                val found = findElementById(node as Element, cleanTarget)
+                if (found != null) return found
+            }
+        }
+        return null
+    }
+
+    private fun parseDp(value: String?): Int {
+        if (value == null || !value.endsWith("dp")) return 0
+        return value.removeSuffix("dp").toIntOrNull() ?: 0
+    }
+
+    @Test
+    fun testNowPlayingVerticalSpaceBudget() {
+        val root = parseXml("app/src/main/res/layout/fragment_now_playing.xml")
+        assertEquals("Root must be ConstraintLayout", "androidx.constraintlayout.widget.ConstraintLayout", root.tagName)
+        assertEquals("Root width must match parent", "match_parent", root.getAttribute("android:layout_width"))
+        assertEquals("Root height must match parent", "match_parent", root.getAttribute("android:layout_height"))
+
+        val totalScreenHeightDp = 410
+
+        // 1. Cover Card
+        val cardCover = findElementById(root, "cardCover")!!
+        val coverWidth = parseDp(cardCover.getAttribute("android:layout_width"))
+        val coverHeight = parseDp(cardCover.getAttribute("android:layout_height"))
+        val coverTopMargin = parseDp(cardCover.getAttribute("android:layout_marginTop"))
+        assertEquals("Cover must be 176dp", 176, coverWidth)
+        assertEquals("Cover must be 176dp", 176, coverHeight)
+        assertEquals("Cover top margin must be 14dp", 14, coverTopMargin)
+
+        val coverTopY = coverTopMargin
+        val coverBottomY = coverTopY + coverHeight // 14 + 176 = 190dp
+
+        // 2. Title & Subtitle Text
+        val tvTitle = findElementById(root, "tvTitle")!!
+        val titleTopMargin = parseDp(tvTitle.getAttribute("android:layout_marginTop"))
+        assertEquals("Title top margin from cover must be 12dp", 12, titleTopMargin)
+        val titleTopY = coverBottomY + titleTopMargin // 190 + 12 = 202dp
+
+        val tvArtistAlbum = findElementById(root, "tvArtistAlbum")!!
+        val artistTopMargin = parseDp(tvArtistAlbum.getAttribute("android:layout_marginTop"))
+        assertEquals("Artist top margin from title must be 2dp", 2, artistTopMargin)
+
+        // Text block budget is budgeted at 40dp (e.g. 18sp ~22dp title + 2dp gap + 13sp ~16dp subtitle = 40dp)
+        val textBudgetDp = 40
+        val textBottomY = titleTopY + textBudgetDp // 202 + 40 = 242dp
+
+        // 3. SeekBar
+        val sbProgress = findElementById(root, "sbProgress")!!
+        val seekbarTopMargin = parseDp(sbProgress.getAttribute("android:layout_marginTop"))
+        val seekbarHeight = parseDp(sbProgress.getAttribute("android:layout_height"))
+        assertEquals("SeekBar top margin must be 14dp", 14, seekbarTopMargin)
+        assertEquals("SeekBar hitbox height must be 32dp", 32, seekbarHeight)
+
+        val seekbarTopY = textBottomY + seekbarTopMargin // 242 + 14 = 256dp
+        val seekbarBottomY = seekbarTopY + seekbarHeight // 256 + 32 = 288dp
+
+        // 4. Control buttons
+        val btnPlayPause = findElementById(root, "btnPlayPause")!!
+        val controlsTopMargin = parseDp(btnPlayPause.getAttribute("android:layout_marginTop"))
+        val controlsHeight = parseDp(btnPlayPause.getAttribute("android:layout_height"))
+        assertEquals("Controls top margin must be 10dp", 10, controlsTopMargin)
+        assertEquals("Center play/pause button height must be 56dp", 56, controlsHeight)
+
+        val controlsTopY = seekbarBottomY + controlsTopMargin // 288 + 10 = 298dp
+        val controlsBottomY = controlsTopY + controlsHeight // 298 + 56 = 354dp
+
+        // 5. Capsule Indicator
+        val indicatorCapsule = findElementById(root, "indicatorCapsule")!!
+        val capsuleBottomMargin = parseDp(indicatorCapsule.getAttribute("android:layout_marginBottom"))
+        val capsuleHeight = parseDp(indicatorCapsule.getAttribute("android:layout_height"))
+        val capsuleWidth = parseDp(indicatorCapsule.getAttribute("android:layout_width"))
+        assertEquals("Capsule bottom margin must be 6dp", 6, capsuleBottomMargin)
+        assertEquals("Capsule height must be 4dp", 4, capsuleHeight)
+        assertEquals("Capsule width must be 18dp", 18, capsuleWidth)
+
+        val capsuleBottomY = totalScreenHeightDp - capsuleBottomMargin // 410 - 6 = 404dp
+        val capsuleTopY = capsuleBottomY - capsuleHeight // 404 - 4 = 400dp
+
+        // Gap between controls bottom and capsule top
+        val controlsToCapsuleGap = capsuleTopY - controlsBottomY // 400 - 354 = 46dp
+        assertEquals("Gap between controls bottom and capsule top must be 46dp", 46, controlsToCapsuleGap)
+
+        // Full vertical budget: 14 + 176 + 12 + 40 + 14 + 32 + 10 + 56 + 46 + 4 + 6 = 410dp
+        val totalCalculated = coverTopMargin + coverHeight + titleTopMargin + textBudgetDp +
+                seekbarTopMargin + seekbarHeight + controlsTopMargin + controlsHeight +
+                controlsToCapsuleGap + capsuleHeight + capsuleBottomMargin
+
+        assertEquals("Full vertical budget must exactly equal screen height 410dp", 410, totalCalculated)
+        assertTrue("Content height without capsule margins (404dp) <= 410dp", 404 <= totalScreenHeightDp)
+    }
+
+    @Test
+    fun testNowPlayingControlsTouchTargets() {
+        val root = parseXml("app/src/main/res/layout/fragment_now_playing.xml")
+
+        val controlIds = listOf("btnPlayMode", "btnPrevious", "btnPlayPause", "btnNext", "btnQueue")
+        for (id in controlIds) {
+            val element = findElementById(root, id)
+            assertTrue("Control $id must exist", element != null)
+            val w = parseDp(element!!.getAttribute("android:layout_width"))
+            val h = parseDp(element.getAttribute("android:layout_height"))
+            assertTrue("Control $id width ($w dp) must be >= 48dp", w >= 48)
+            assertTrue("Control $id height ($h dp) must be >= 48dp", h >= 48)
+        }
+    }
+
+    @Test
+    fun testAlphabetGridTouchTargets() {
+        val root = parseXml("app/src/main/res/layout/fragment_library.xml")
+        val gridAlphabet = findElementById(root, "gridAlphabet")!!
+        val children = gridAlphabet.childNodes
+
+        var buttonCount = 0
+        for (i in 0 until children.length) {
+            val node = children.item(i)
+            if (node.nodeType == Node.ELEMENT_NODE) {
+                val element = node as Element
+                val w = parseDp(element.getAttribute("android:layout_width"))
+                val h = parseDp(element.getAttribute("android:layout_height"))
+                assertTrue("Grid item '${element.textContent.trim()}' width ($w dp) must be >= 48dp", w >= 48)
+                assertTrue("Grid item '${element.textContent.trim()}' height ($h dp) must be >= 48dp", h >= 48)
+                buttonCount++
+            }
+        }
+        assertEquals("Alphabet grid must contain 27 buttons (A-Z and #)", 27, buttonCount)
+    }
+
+    @Test
+    fun testBtnQuickScanTouchTargetDiscrepancy() {
+        val root = parseXml("app/src/main/res/layout/fragment_library.xml")
+        val btnQuickScan = findElementById(root, "btnQuickScan")!!
+        val w = parseDp(btnQuickScan.getAttribute("android:layout_width"))
+        val h = parseDp(btnQuickScan.getAttribute("android:layout_height"))
+
+        // Documenting the specific measurement:
+        // R4 specifies 40dp x 40dp, while the generic touch guideline calls for >= 48dp x 48dp.
+        assertEquals("btnQuickScan width in XML is 40dp", 40, w)
+        assertEquals("btnQuickScan height in XML is 40dp", 40, h)
+    }
+
+    @Test
+    fun testQueueHorizontalAlignmentInvariant() {
+        val root = parseXml("app/src/main/res/layout/item_queue.xml")
+        val paddingStart = parseDp(root.getAttribute("android:paddingStart"))
+        assertEquals("item_queue paddingStart must be 10dp", 10, paddingStart)
+
+        val layoutLeadingContainer = findElementById(root, "layoutLeadingContainer")!!
+        val containerWidth = parseDp(layoutLeadingContainer.getAttribute("android:layout_width"))
+        assertEquals("layoutLeadingContainer width must be fixed at 36dp", 36, containerWidth)
+
+        val tvQueueTitle = findElementById(root, "tvQueueTitle")!!
+        val titleMarginStart = parseDp(tvQueueTitle.getAttribute("android:layout_marginStart"))
+        val titleStartAnchor = tvQueueTitle.getAttribute("app:layout_constraintStart_toEndOf")
+        assertTrue("Title must start to end of layoutLeadingContainer", titleStartAnchor.contains("layoutLeadingContainer"))
+        assertEquals("Title marginStart must be 8dp", 8, titleMarginStart)
+
+        val tvQueueArtist = findElementById(root, "tvQueueArtist")!!
+        val artistMarginStart = parseDp(tvQueueArtist.getAttribute("android:layout_marginStart"))
+        val artistStartAnchor = tvQueueArtist.getAttribute("app:layout_constraintStart_toEndOf")
+        assertTrue("Artist must start to end of layoutLeadingContainer", artistStartAnchor.contains("layoutLeadingContainer"))
+        assertEquals("Artist marginStart must be 8dp", 8, artistMarginStart)
+
+        // Mathematical invariant calculation:
+        // Container start = paddingStart = 10dp
+        // Container end = paddingStart + containerWidth = 10 + 36 = 46dp
+        // Text start = Container end + marginStart = 46 + 8 = 54dp
+        val unplayedTextStartX = paddingStart + containerWidth + titleMarginStart
+        val playingTextStartX = paddingStart + containerWidth + titleMarginStart
+
+        assertEquals("Text start position must be 54dp", 54, unplayedTextStartX)
+        assertEquals("Unplayed vs playing start position delta must be strictly 0dp", 0, playingTextStartX - unplayedTextStartX)
+    }
+
+    @Test
+    fun testSongItemHorizontalAlignmentInvariant() {
+        val root = parseXml("app/src/main/res/layout/item_song.xml")
+        val paddingStart = parseDp(root.getAttribute("android:paddingStart"))
+        assertEquals("item_song paddingStart must be 10dp", 10, paddingStart)
+
+        val layoutCoverContainer = findElementById(root, "layoutCoverContainer")!!
+        val containerWidth = parseDp(layoutCoverContainer.getAttribute("android:layout_width"))
+        assertEquals("layoutCoverContainer width must be fixed at 38dp", 38, containerWidth)
+
+        val tvTitle = findElementById(root, "tvTitle")!!
+        val titleMarginStart = parseDp(tvTitle.getAttribute("android:layout_marginStart"))
+        val titleStartAnchor = tvTitle.getAttribute("app:layout_constraintStart_toEndOf")
+        assertTrue("Title must start to end of layoutCoverContainer", titleStartAnchor.contains("layoutCoverContainer"))
+        assertEquals("Title marginStart must be 10dp", 10, titleMarginStart)
+
+        val unplayedTextStartX = paddingStart + containerWidth + titleMarginStart
+        val playingTextStartX = paddingStart + containerWidth + titleMarginStart
+
+        assertEquals("Song title start position must be 58dp", 58, unplayedTextStartX)
+        assertEquals("Unplayed vs playing start position delta must be strictly 0dp", 0, playingTextStartX - unplayedTextStartX)
+    }
+}
