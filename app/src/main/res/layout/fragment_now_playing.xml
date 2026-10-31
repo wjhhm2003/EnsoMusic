@@ -32,6 +32,25 @@
             android:src="@drawable/ic_music_note_24" />
     </androidx.cardview.widget.CardView>
 
+    <!-- Top Left: Lyric Shortcut Capsule (touch target >= 44dp x 30dp) -->
+    <TextView
+        android:id="@+id/btnLyricCapsule"
+        android:layout_width="wrap_content"
+        android:layout_height="30dp"
+        android:layout_marginTop="2dp"
+        android:layout_marginStart="10dp"
+        android:background="@drawable/bg_volume_capsule"
+        android:gravity="center"
+        android:minWidth="44dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:text="词"
+        android:textColor="@color/white"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
     <!-- Top Right: Volume Shortcut Capsule (touch target >= 48dp x 32dp) -->
     <TextView
         android:id="@+id/btnVolumeCapsule"
@@ -195,6 +214,113 @@
         app:layout_constraintStart_toEndOf="@+id/btnNext"
         app:layout_constraintTop_toTopOf="@+id/btnPlayPause"
         app:tint="@color/white" />
+
+    <!-- Fullscreen Minimalist Lyric Overlay -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/layoutLyricOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/black"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <!-- Top Control Bar -->
+        <!-- Back to Now Playing -->
+        <ImageView
+            android:id="@+id/btnLyricBack"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="返回播放页"
+            android:padding="11dp"
+            android:src="@drawable/ic_arrow_back_24"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:tint="@color/white" />
+
+        <!-- Title in Lyric Header (Single Line Marquee) -->
+        <TextView
+            android:id="@+id/tvLyricSongTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:ellipsize="marquee"
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:gravity="center"
+            android:marqueeRepeatLimit="marquee_forever"
+            android:scrollHorizontally="true"
+            android:singleLine="true"
+            android:textColor="@color/white"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            app:layout_constraintBottom_toBottomOf="@+id/btnLyricBack"
+            app:layout_constraintEnd_toStartOf="@+id/btnLyricRefresh"
+            app:layout_constraintStart_toEndOf="@+id/btnLyricBack"
+            app:layout_constraintTop_toTopOf="@+id/btnLyricBack"
+            tools:text="歌曲标题" />
+
+        <!-- Refresh / Force search online -->
+        <ImageView
+            android:id="@+id/btnLyricRefresh"
+            android:layout_width="40dp"
+            android:layout_height="44dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="重新搜索歌词"
+            android:padding="11dp"
+            android:src="@drawable/ic_refresh_24"
+            app:layout_constraintEnd_toStartOf="@+id/btnLyricDisplayMode"
+            app:layout_constraintTop_toTopOf="parent"
+            app:tint="@color/text_secondary" />
+
+        <!-- Toggle Translation & Romanization Capsule -->
+        <TextView
+            android:id="@+id/btnLyricDisplayMode"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_volume_capsule"
+            android:gravity="center"
+            android:minWidth="44dp"
+            android:paddingStart="7dp"
+            android:paddingEnd="7dp"
+            android:text="译/音"
+            android:textColor="@color/white"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            app:layout_constraintBottom_toBottomOf="@+id/btnLyricBack"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="@+id/btnLyricBack" />
+
+        <!-- Lyric Custom View -->
+        <com.enso.music.ui.lyric.LyricView
+            android:id="@+id/lyricView"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/btnLyricBack" />
+
+        <!-- Empty state hint -->
+        <TextView
+            android:id="@+id/tvLyricEmpty"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:lineSpacingExtra="4dp"
+            android:text="暂无歌词\n轻触右上角可重新在线检索"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/btnLyricBack" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
 
     <!-- Phase 2: Fine Volume Control Overlay (Centered Card with Dimmed Backdrop) -->
     <FrameLayout

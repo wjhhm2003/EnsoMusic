@@ -34,6 +34,14 @@ class NowPlayingFragment : Fragment() {
     private var volumeAutoHideJob: Job? = null
     private var isScreenOn = true
 
+    // Lyric state
+    var isLyricShowing: Boolean = false
+        private set
+    private var currentSongPath: String? = null
+    private var currentLyricData: com.enso.music.data.lyric.model.LyricData = com.enso.music.data.lyric.model.LyricData.EMPTY
+    private var lyricJob: Job? = null
+    private var lyricSyncJob: Job? = null
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -48,6 +56,7 @@ class NowPlayingFragment : Fragment() {
         // Crucial marquee fix: enable marquee continuous scrolling
         binding.tvTitle.isSelected = true
         setupControls()
+        setupLyricControls()
         setupVolumeControls()
         observePlaybackState()
     }
@@ -98,6 +107,14 @@ class NowPlayingFragment : Fragment() {
             } else {
                 activity?.findViewById<ViewPager2>(R.id.viewPager)?.currentItem = 2
             }
+        }
+
+        binding.btnLyricCapsule.setOnClickListener {
+            showLyricView()
+        }
+
+        binding.cardCover.setOnClickListener {
+            showLyricView()
         }
 
         binding.sbProgress.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -164,10 +181,6 @@ class NowPlayingFragment : Fragment() {
     private fun setupVolumeControls() {
         // Overlay triggers
         binding.btnVolumeCapsule.setOnClickListener {
-            showVolumeOverlay()
-        }
-
-        binding.cardCover.setOnClickListener {
             showVolumeOverlay()
         }
 
@@ -259,6 +272,117 @@ class NowPlayingFragment : Fragment() {
         }
     }
 
+    private fun setupLyricControls() {
+        binding.btnLyricBack.setOnClickListener {
+            hideLyricView()
+        }
+
+        binding.btnLyricRefresh.setOnClickListener {
+            val song = getService()?.playbackInfo?.value?.currentSong
+            if (song != null) {
+                loadLyricsForSong(song, forceRefresh = true)
+            }
+        }
+
+        binding.btnLyricDisplayMode.setOnClickListener {
+            val modeLabel = binding.lyricView.cycleDisplayMode()
+            binding.btnLyricDisplayMode.text = modeLabel
+        }
+
+        binding.lyricView.onLineClickListener = { targetMs ->
+            getService()?.seekTo(targetMs)
+        }
+    }
+
+    fun showLyricView() {
+        isLyricShowing = true
+        binding.layoutLyricOverlay.visibility = View.VISIBLE
+        binding.layoutLyricOverlay.alpha = 1f
+        binding.tvLyricSongTitle.isSelected = true
+        val song = getService()?.playbackInfo?.value?.currentSong
+        if (song != null) {
+            binding.tvLyricSongTitle.text = song.title
+            if (currentSongPath != song.path || currentLyricData.isEmpty()) {
+                loadLyricsForSong(song, forceRefresh = false)
+            }
+        } else {
+            binding.tvLyricSongTitle.text = "暂无播放"
+            showLyricEmptyState(true)
+        }
+        startLyricSyncIfNeeded()
+    }
+
+    fun hideLyricView(): Boolean {
+        if (isLyricShowing) {
+            isLyricShowing = false
+            stopLyricSync()
+            binding.layoutLyricOverlay.visibility = View.GONE
+            return true
+        }
+        return false
+    }
+
+    private fun loadLyricsForSong(song: SongEntity, forceRefresh: Boolean) {
+        lyricJob?.cancel()
+        currentSongPath = song.path
+        binding.tvLyricSongTitle.text = song.title
+        binding.tvLyricSongTitle.isSelected = true
+
+        lyricJob = com.enso.music.data.lyric.LyricManager.getInstance(requireContext()).loadLyric(
+            song = song,
+            forceOnlineRefresh = forceRefresh
+        ) { lyricData ->
+            if (!isAdded) return@loadLyric
+            currentLyricData = lyricData
+            if (lyricData.isEmpty()) {
+                showLyricEmptyState(true)
+            } else {
+                showLyricEmptyState(false)
+                binding.lyricView.setLyricData(lyricData)
+                val pos = getService()?.getPosition() ?: 0L
+                binding.lyricView.updatePlaybackProgress(pos)
+            }
+            if (isLyricShowing) {
+                startLyricSyncIfNeeded()
+            }
+        }
+    }
+
+    private fun showLyricEmptyState(isEmpty: Boolean) {
+        if (isEmpty) {
+            binding.tvLyricEmpty.visibility = View.VISIBLE
+            binding.lyricView.visibility = View.GONE
+        } else {
+            binding.tvLyricEmpty.visibility = View.GONE
+            binding.lyricView.visibility = View.VISIBLE
+        }
+    }
+
+    private fun startLyricSyncIfNeeded() {
+        stopLyricSync()
+        if (!isLyricShowing || !isScreenOn || !isResumed || getService()?.isPlaying() != true) {
+            return
+        }
+        val hasWords = currentLyricData.hasWordTiming
+        val syncDelayMs = if (hasWords) 33L else 300L // 30fps for word-level karaoke, 300ms for line sync
+
+        lyricSyncJob = viewLifecycleOwner.lifecycleScope.launch {
+            while (isActive) {
+                val service = getService()
+                if (service != null && service.isPlaying()) {
+                    val pos = service.getPosition()
+                    binding.lyricView.updatePlaybackProgress(pos)
+                }
+                delay(syncDelayMs)
+            }
+        }
+    }
+
+    private fun stopLyricSync() {
+        lyricSyncJob?.cancel()
+        lyricSyncJob = null
+    }
+
     private fun updateSystemVolumeUi(service: MusicPlaybackService) {
         val cur = service.getSystemVolume()
         val max = service.getMaxSystemVolume()
@@ -274,6 +398,10 @@ class NowPlayingFragment : Fragment() {
                 binding.tvArtistAlbum.text = formatSubtitle(song)
             }
 
+            if (currentSongPath != song.path) {
+                loadLyricsForSong(song, forceRefresh = false)
+            }
+
             CoverManager.getInstance(requireContext()).loadInto(
                 binding.ivCover,
                 song.coverPath,
@@ -283,6 +411,10 @@ class NowPlayingFragment : Fragment() {
         } else {
             binding.tvTitle.text = "暂无播放"
             binding.tvTitle.isSelected = true
+            binding.tvLyricSongTitle.text = "暂无播放"
+            currentSongPath = null
+            currentLyricData = com.enso.music.data.lyric.model.LyricData.EMPTY
+            showLyricEmptyState(true)
             if (!isUserTrackingSeekBar) {
                 binding.tvArtistAlbum.text = "请在曲库选择歌曲"
             }
@@ -293,9 +425,13 @@ class NowPlayingFragment : Fragment() {
         if (info.isPlaying) {
             binding.btnPlayPause.setImageResource(R.drawable.ic_pause_24)
             startProgressPolling()
+            if (isLyricShowing) {
+                startLyricSyncIfNeeded()
+            }
         } else {
             binding.btnPlayPause.setImageResource(R.drawable.ic_play_24)
             stopProgressPolling()
+            stopLyricSync()
         }
 
         // Mode icon
@@ -338,8 +474,12 @@ class NowPlayingFragment : Fragment() {
         isScreenOn = screenOn
         if (isScreenOn && isResumed && getService()?.isPlaying() == true) {
             startProgressPolling()
+            if (isLyricShowing) {
+                startLyricSyncIfNeeded()
+            }
         } else {
             stopProgressPolling()
+            stopLyricSync()
         }
     }
 
@@ -366,18 +506,26 @@ class NowPlayingFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         binding.tvTitle.isSelected = true
+        binding.tvLyricSongTitle.isSelected = true
         if (isScreenOn && getService()?.isPlaying() == true) {
             startProgressPolling()
+            if (isLyricShowing) {
+                startLyricSyncIfNeeded()
+            }
         }
     }
 
     override fun onPause() {
         stopProgressPolling()
+        stopLyricSync()
         super.onPause()
     }
 
     override fun onDestroyView() {
         stopProgressPolling()
+        stopLyricSync()
+        lyricJob?.cancel()
+        lyricJob = null
         volumeAutoHideJob?.cancel()
         volumeAutoHideJob = null
         _binding = null

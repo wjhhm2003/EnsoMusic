@@ -192,6 +192,14 @@ class MainActivity : AppCompatActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (nowPlayingFragment?.hideLyricView() == true) {
+            return
+        }
+        super.onBackPressed()
+    }
+
     override fun onDestroy() {
         try {
             unregisterReceiver(screenReceiver)
