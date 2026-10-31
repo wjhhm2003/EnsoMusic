@@ -6,7 +6,7 @@
     android:layout_height="52dp"
     android:background="?attr/selectableItemBackground"
     android:paddingStart="10dp"
-    android:paddingEnd="10dp">
+    android:paddingEnd="24dp">
 
     <ImageView
         android:id="@+id/ivArtistIcon"

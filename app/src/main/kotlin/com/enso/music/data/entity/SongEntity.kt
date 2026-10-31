@@ -1,6 +1,7 @@
 package com.enso.music.data.entity
 
 import androidx.room.Entity
+import androidx.room.Ignore
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -42,10 +43,32 @@ data class AlbumItem(
     val artist: String,
     val songCount: Int,
     val coverPath: String?
-)
+) {
+    @Ignore
+    var sortKey: String = ""
+
+    @Ignore
+    var sortInitial: String = "#"
+
+    fun withSort(key: String, initial: String): AlbumItem = apply {
+        this.sortKey = key
+        this.sortInitial = initial
+    }
+}
 
 data class ArtistItem(
     val artist: String,
     val songCount: Int,
     val albumCount: Int
-)
+) {
+    @Ignore
+    var sortKey: String = ""
+
+    @Ignore
+    var sortInitial: String = "#"
+
+    fun withSort(key: String, initial: String): ArtistItem = apply {
+        this.sortKey = key
+        this.sortInitial = initial
+    }
+}

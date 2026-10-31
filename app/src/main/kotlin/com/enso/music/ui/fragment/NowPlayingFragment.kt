@@ -1,5 +1,6 @@
 package com.enso.music.ui.fragment
 
+import android.media.AudioManager
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -30,6 +31,7 @@ class NowPlayingFragment : Fragment() {
 
     private var isUserTrackingSeekBar = false
     private var progressJob: Job? = null
+    private var volumeAutoHideJob: Job? = null
     private var isScreenOn = true
 
     override fun onCreateView(
@@ -46,6 +48,7 @@ class NowPlayingFragment : Fragment() {
         // Crucial marquee fix: enable marquee continuous scrolling
         binding.tvTitle.isSelected = true
         setupControls()
+        setupVolumeControls()
         observePlaybackState()
     }
 
@@ -138,13 +141,128 @@ class NowPlayingFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 (activity as? MainActivity)?.serviceConnectedFlow?.collect { connected ->
                     if (connected) {
-                        getService()?.playbackInfo?.collect { info ->
-                            updateUi(info)
+                        launch {
+                            getService()?.playbackInfo?.collect { info ->
+                                updateUi(info)
+                            }
+                        }
+                        launch {
+                            getService()?.fineVolumeFlow?.collect { fineVol ->
+                                binding.btnVolumeCapsule.text = "🔊 ${fineVol}%"
+                                binding.tvVolumeTitle.text = "精细音量 ${fineVol}%"
+                                if (binding.sbFineVolume.progress != fineVol) {
+                                    binding.sbFineVolume.progress = fineVol
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    private fun setupVolumeControls() {
+        // Overlay triggers
+        binding.btnVolumeCapsule.setOnClickListener {
+            showVolumeOverlay()
+        }
+
+        binding.cardCover.setOnClickListener {
+            showVolumeOverlay()
+        }
+
+        // Tap backdrop to dismiss
+        binding.layoutVolumeOverlay.setOnClickListener {
+            hideVolumeOverlay()
+        }
+
+        binding.cardVolumePanel.setOnClickListener {
+            // Prevent dismissal when clicking inside the panel
+            resetVolumeAutoHide()
+        }
+
+        // Fine volume step buttons
+        binding.btnVolMinus.setOnClickListener {
+            getService()?.adjustFineVolume(-1)
+            resetVolumeAutoHide()
+        }
+
+        binding.btnVolPlus.setOnClickListener {
+            getService()?.adjustFineVolume(1)
+            resetVolumeAutoHide()
+        }
+
+        // Fine volume seekbar
+        binding.sbFineVolume.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    getService()?.setFineVolume(progress)
+                    resetVolumeAutoHide()
+                }
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                volumeAutoHideJob?.cancel()
+            }
+
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                resetVolumeAutoHide()
+            }
+        })
+
+        // System volume buttons
+        binding.btnSysVolMinus.setOnClickListener {
+            val service = getService() ?: return@setOnClickListener
+            service.adjustSystemVolume(AudioManager.ADJUST_LOWER)
+            updateSystemVolumeUi(service)
+            resetVolumeAutoHide()
+        }
+
+        binding.btnSysVolPlus.setOnClickListener {
+            val service = getService() ?: return@setOnClickListener
+            service.adjustSystemVolume(AudioManager.ADJUST_RAISE)
+            updateSystemVolumeUi(service)
+            resetVolumeAutoHide()
+        }
+    }
+
+    fun showVolumeOverlay() {
+        val service = getService() ?: return
+        updateSystemVolumeUi(service)
+        val currentVol = service.getFineVolume()
+        binding.btnVolumeCapsule.text = "🔊 ${currentVol}%"
+        binding.tvVolumeTitle.text = "精细音量 ${currentVol}%"
+        binding.sbFineVolume.progress = currentVol
+
+        binding.layoutVolumeOverlay.visibility = View.VISIBLE
+        binding.layoutVolumeOverlay.alpha = 1f
+        resetVolumeAutoHide()
+    }
+
+    fun hideVolumeOverlay() {
+        volumeAutoHideJob?.cancel()
+        volumeAutoHideJob = null
+        binding.layoutVolumeOverlay.animate()
+            .alpha(0f)
+            .setDuration(200)
+            .withEndAction {
+                binding.layoutVolumeOverlay.visibility = View.GONE
+            }
+            .start()
+    }
+
+    private fun resetVolumeAutoHide() {
+        volumeAutoHideJob?.cancel()
+        volumeAutoHideJob = viewLifecycleOwner.lifecycleScope.launch {
+            delay(2500L)
+            hideVolumeOverlay()
+        }
+    }
+
+    private fun updateSystemVolumeUi(service: MusicPlaybackService) {
+        val cur = service.getSystemVolume()
+        val max = service.getMaxSystemVolume()
+        binding.tvSystemVolumeText.text = "$cur / $max 格"
     }
 
     private fun updateUi(info: com.enso.music.service.PlaybackInfo) {
@@ -260,6 +378,8 @@ class NowPlayingFragment : Fragment() {
 
     override fun onDestroyView() {
         stopProgressPolling()
+        volumeAutoHideJob?.cancel()
+        volumeAutoHideJob = null
         _binding = null
         super.onDestroyView()
     }

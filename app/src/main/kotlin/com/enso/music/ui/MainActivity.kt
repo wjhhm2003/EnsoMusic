@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.view.KeyEvent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -173,6 +174,22 @@ class MainActivity : AppCompatActivity() {
             scanner.ensureDefaultFoldersConfigured()
             scanner.startScan(isFullRescan = false)
         }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        when (keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> {
+                playbackService?.adjustFineVolume(4)
+                nowPlayingFragment?.showVolumeOverlay()
+                return true
+            }
+            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                playbackService?.adjustFineVolume(-4)
+                nowPlayingFragment?.showVolumeOverlay()
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onDestroy() {

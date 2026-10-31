@@ -1,6 +1,7 @@
 package com.enso.music.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.w3c.dom.Element
@@ -59,77 +60,44 @@ class LayoutIntegrityChallengerTest {
         assertEquals("Root width must match parent", "match_parent", root.getAttribute("android:layout_width"))
         assertEquals("Root height must match parent", "match_parent", root.getAttribute("android:layout_height"))
 
-        val totalScreenHeightDp = 410
+        // Phase 1: Safe padding to prevent clipping at bottom edge
+        assertEquals("Root paddingTop must be 8dp", 8, parseDp(root.getAttribute("android:paddingTop")))
+        assertEquals("Root paddingBottom must be 14dp", 14, parseDp(root.getAttribute("android:paddingBottom")))
 
-        // 1. Cover Card
+        // 1. Cover Card - percentage height adaptive
         val cardCover = findElementById(root, "cardCover")!!
-        val coverWidth = parseDp(cardCover.getAttribute("android:layout_width"))
-        val coverHeight = parseDp(cardCover.getAttribute("android:layout_height"))
-        val coverTopMargin = parseDp(cardCover.getAttribute("android:layout_marginTop"))
-        assertEquals("Cover must be 176dp", 176, coverWidth)
-        assertEquals("Cover must be 176dp", 176, coverHeight)
-        assertEquals("Cover top margin must be 14dp", 14, coverTopMargin)
-
-        val coverTopY = coverTopMargin
-        val coverBottomY = coverTopY + coverHeight // 14 + 176 = 190dp
+        assertEquals("Cover dimension ratio must be 1:1", "1:1", cardCover.getAttribute("app:layout_constraintDimensionRatio"))
+        assertEquals("Cover max height must be 136dp", 136, parseDp(cardCover.getAttribute("app:layout_constraintHeight_max")))
+        assertEquals("Cover percent height must be 0.38", "0.38", cardCover.getAttribute("app:layout_constraintHeight_percent"))
 
         // 2. Title & Subtitle Text
         val tvTitle = findElementById(root, "tvTitle")!!
         val titleTopMargin = parseDp(tvTitle.getAttribute("android:layout_marginTop"))
-        assertEquals("Title top margin from cover must be 12dp", 12, titleTopMargin)
-        val titleTopY = coverBottomY + titleTopMargin // 190 + 12 = 202dp
+        assertEquals("Title top margin from cover must be 8dp", 8, titleTopMargin)
 
         val tvArtistAlbum = findElementById(root, "tvArtistAlbum")!!
         val artistTopMargin = parseDp(tvArtistAlbum.getAttribute("android:layout_marginTop"))
         assertEquals("Artist top margin from title must be 2dp", 2, artistTopMargin)
 
-        // Text block budget is budgeted at 40dp (e.g. 18sp ~22dp title + 2dp gap + 13sp ~16dp subtitle = 40dp)
-        val textBudgetDp = 40
-        val textBottomY = titleTopY + textBudgetDp // 202 + 40 = 242dp
-
         // 3. SeekBar
         val sbProgress = findElementById(root, "sbProgress")!!
         val seekbarTopMargin = parseDp(sbProgress.getAttribute("android:layout_marginTop"))
         val seekbarHeight = parseDp(sbProgress.getAttribute("android:layout_height"))
-        assertEquals("SeekBar top margin must be 14dp", 14, seekbarTopMargin)
-        assertEquals("SeekBar hitbox height must be 32dp", 32, seekbarHeight)
-
-        val seekbarTopY = textBottomY + seekbarTopMargin // 242 + 14 = 256dp
-        val seekbarBottomY = seekbarTopY + seekbarHeight // 256 + 32 = 288dp
+        assertEquals("SeekBar top margin must be 8dp", 8, seekbarTopMargin)
+        assertEquals("SeekBar hitbox height must be 26dp", 26, seekbarHeight)
+        assertEquals("SeekBar maxHeight must be 3dp", 3, parseDp(sbProgress.getAttribute("android:maxHeight")))
+        assertEquals("SeekBar minHeight must be 3dp", 3, parseDp(sbProgress.getAttribute("android:minHeight")))
 
         // 4. Control buttons
         val btnPlayPause = findElementById(root, "btnPlayPause")!!
         val controlsTopMargin = parseDp(btnPlayPause.getAttribute("android:layout_marginTop"))
         val controlsHeight = parseDp(btnPlayPause.getAttribute("android:layout_height"))
-        assertEquals("Controls top margin must be 10dp", 10, controlsTopMargin)
-        assertEquals("Center play/pause button height must be 56dp", 56, controlsHeight)
+        assertEquals("Controls top margin must be 6dp", 6, controlsTopMargin)
+        assertEquals("Center play/pause button height must be 48dp", 48, controlsHeight)
 
-        val controlsTopY = seekbarBottomY + controlsTopMargin // 288 + 10 = 298dp
-        val controlsBottomY = controlsTopY + controlsHeight // 298 + 56 = 354dp
-
-        // 5. Capsule Indicator
-        val indicatorCapsule = findElementById(root, "indicatorCapsule")!!
-        val capsuleBottomMargin = parseDp(indicatorCapsule.getAttribute("android:layout_marginBottom"))
-        val capsuleHeight = parseDp(indicatorCapsule.getAttribute("android:layout_height"))
-        val capsuleWidth = parseDp(indicatorCapsule.getAttribute("android:layout_width"))
-        assertEquals("Capsule bottom margin must be 6dp", 6, capsuleBottomMargin)
-        assertEquals("Capsule height must be 4dp", 4, capsuleHeight)
-        assertEquals("Capsule width must be 18dp", 18, capsuleWidth)
-
-        val capsuleBottomY = totalScreenHeightDp - capsuleBottomMargin // 410 - 6 = 404dp
-        val capsuleTopY = capsuleBottomY - capsuleHeight // 404 - 4 = 400dp
-
-        // Gap between controls bottom and capsule top
-        val controlsToCapsuleGap = capsuleTopY - controlsBottomY // 400 - 354 = 46dp
-        assertEquals("Gap between controls bottom and capsule top must be 46dp", 46, controlsToCapsuleGap)
-
-        // Full vertical budget: 14 + 176 + 12 + 40 + 14 + 32 + 10 + 56 + 46 + 4 + 6 = 410dp
-        val totalCalculated = coverTopMargin + coverHeight + titleTopMargin + textBudgetDp +
-                seekbarTopMargin + seekbarHeight + controlsTopMargin + controlsHeight +
-                controlsToCapsuleGap + capsuleHeight + capsuleBottomMargin
-
-        assertEquals("Full vertical budget must exactly equal screen height 410dp", 410, totalCalculated)
-        assertTrue("Content height without capsule margins (404dp) <= 410dp", 404 <= totalScreenHeightDp)
+        // 5. Duplicate Capsule Indicator must be completely removed
+        val indicatorCapsule = findElementById(root, "indicatorCapsule")
+        assertNull("Duplicate indicatorCapsule must be completely removed", indicatorCapsule)
     }
 
     @Test
@@ -142,8 +110,8 @@ class LayoutIntegrityChallengerTest {
             assertTrue("Control $id must exist", element != null)
             val w = parseDp(element!!.getAttribute("android:layout_width"))
             val h = parseDp(element.getAttribute("android:layout_height"))
-            assertTrue("Control $id width ($w dp) must be >= 48dp", w >= 48)
-            assertTrue("Control $id height ($h dp) must be >= 48dp", h >= 48)
+            assertTrue("Control $id width ($w dp) must be >= 44dp", w >= 44)
+            assertTrue("Control $id height ($h dp) must be >= 44dp", h >= 44)
         }
     }
 

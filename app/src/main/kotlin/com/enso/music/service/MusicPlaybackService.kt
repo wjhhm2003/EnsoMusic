@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Collections
+import kotlin.math.pow
 
 class MusicPlaybackService : Service(),
     MediaPlayer.OnPreparedListener,
@@ -68,6 +69,7 @@ class MusicPlaybackService : Service(),
         private const val KEY_LAST_PATH = "last_song_path"
         private const val KEY_LAST_POS = "last_position"
         private const val KEY_PLAY_MODE = "last_play_mode"
+        private const val KEY_FINE_VOLUME = "fine_volume_percent"
     }
 
     inner class MusicBinder : Binder() {
@@ -99,6 +101,10 @@ class MusicPlaybackService : Service(),
     private val _currentQueue = MutableStateFlow<List<SongEntity>>(emptyList())
     val currentQueue: StateFlow<List<SongEntity>> = _currentQueue.asStateFlow()
 
+    private var fineVolumePercent = 75
+    private val _fineVolumeFlow = MutableStateFlow(75)
+    val fineVolumeFlow: StateFlow<Int> = _fineVolumeFlow.asStateFlow()
+
     private var audioFocusRequest: AudioFocusRequest? = null
     private var hasAudioFocus = false
     private var resumeOnFocusGain = false
@@ -115,6 +121,9 @@ class MusicPlaybackService : Service(),
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         prefs = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         coverManager = CoverManager.getInstance(this)
+
+        fineVolumePercent = prefs.getInt(KEY_FINE_VOLUME, 75)
+        _fineVolumeFlow.value = fineVolumePercent
 
         initWakeLock()
         initMediaPlayer()
@@ -166,6 +175,7 @@ class MusicPlaybackService : Service(),
             setOnCompletionListener(this@MusicPlaybackService)
             setOnErrorListener(this@MusicPlaybackService)
         }
+        applyFineVolume()
     }
 
     private fun initMediaSession() {
@@ -347,16 +357,15 @@ class MusicPlaybackService : Service(),
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 Log.w(TAG, "AudioFocus ducking")
                 try {
-                    mediaPlayer?.setVolume(0.2f, 0.2f)
+                    val normalized = (fineVolumePercent.coerceIn(0, 100)) / 100f
+                    val gain = if (fineVolumePercent == 0) 0f else normalized.toDouble().pow(1.8).toFloat()
+                    mediaPlayer?.setVolume(gain * 0.2f, gain * 0.2f)
                 } catch (ignored: Exception) {
                 }
             }
             AudioManager.AUDIOFOCUS_GAIN -> {
                 Log.i(TAG, "AudioFocus gained")
-                try {
-                    mediaPlayer?.setVolume(1.0f, 1.0f)
-                } catch (ignored: Exception) {
-                }
+                applyFineVolume()
                 if (resumeOnFocusGain) {
                     resumeOnFocusGain = false
                     resume()
@@ -414,6 +423,7 @@ class MusicPlaybackService : Service(),
 
     override fun onPrepared(mp: MediaPlayer?) {
         Log.i(TAG, "MediaPlayer prepared")
+        applyFineVolume()
         if (requestAudioFocus()) {
             mp?.start()
             acquireWakeLock()
@@ -595,6 +605,58 @@ class MusicPlaybackService : Service(),
 
     fun getCurrentSong(): SongEntity? {
         return if (currentIndex in playlist.indices) playlist[currentIndex] else null
+    }
+
+    // Phase 2: Fine-grained Software Volume (0..100) & System Volume Control
+    fun setFineVolume(percent: Int) {
+        val coerced = percent.coerceIn(0, 100)
+        fineVolumePercent = coerced
+        _fineVolumeFlow.value = coerced
+        prefs.edit().putInt(KEY_FINE_VOLUME, coerced).apply()
+        applyFineVolume()
+    }
+
+    fun adjustFineVolume(delta: Int): Int {
+        val target = (fineVolumePercent + delta).coerceIn(0, 100)
+        setFineVolume(target)
+        return target
+    }
+
+    fun getFineVolume(): Int = fineVolumePercent
+
+    fun applyFineVolume() {
+        try {
+            val normalized = (fineVolumePercent.coerceIn(0, 100)) / 100f
+            val gain = if (fineVolumePercent == 0) 0f else normalized.toDouble().pow(1.8).toFloat()
+            mediaPlayer?.setVolume(gain, gain)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error applying fine volume", e)
+        }
+    }
+
+    fun getSystemVolume(): Int {
+        return try {
+            audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        } catch (e: Exception) {
+            0
+        }
+    }
+
+    fun getMaxSystemVolume(): Int {
+        return try {
+            audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        } catch (e: Exception) {
+            15
+        }
+    }
+
+    fun adjustSystemVolume(direction: Int): Int {
+        try {
+            audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, direction, 0)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error adjusting system volume", e)
+        }
+        return getSystemVolume()
     }
 
     private fun regenerateShuffleIndices() {

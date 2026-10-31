@@ -4,18 +4,23 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/black">
+    android:background="@color/black"
+    android:paddingTop="8dp"
+    android:paddingBottom="14dp">
 
-    <!-- Top Centered Cover Art: 176dp x 176dp (~43% height), cornerRadius 18dp, elevation 0dp, top margin 14dp -->
+    <!-- Top Centered Cover Art: Adaptive percent height (38%, max 136dp), 1:1 ratio, cornerRadius 16dp -->
     <androidx.cardview.widget.CardView
         android:id="@+id/cardCover"
-        android:layout_width="176dp"
-        android:layout_height="176dp"
-        android:layout_marginTop="14dp"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:foreground="?attr/selectableItemBackground"
         app:cardBackgroundColor="@color/card_bg"
-        app:cardCornerRadius="18dp"
+        app:cardCornerRadius="16dp"
         app:cardElevation="0dp"
+        app:layout_constraintDimensionRatio="1:1"
         app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHeight_max="136dp"
+        app:layout_constraintHeight_percent="0.38"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
 
@@ -27,14 +32,33 @@
             android:src="@drawable/ic_music_note_24" />
     </androidx.cardview.widget.CardView>
 
-    <!-- Dual-Line Centered Text: 12dp below cover art, strictly centered horizontally -->
-    <!-- Song Title: 18sp pure white (#FFFFFF), single line marquee -->
+    <!-- Top Right: Volume Shortcut Capsule (touch target >= 48dp x 36dp) -->
+    <TextView
+        android:id="@+id/btnVolumeCapsule"
+        android:layout_width="wrap_content"
+        android:layout_height="32dp"
+        android:layout_marginTop="2dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/bg_volume_capsule"
+        android:gravity="center"
+        android:minWidth="48dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:textColor="@color/white"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        tools:text="🔊 75%" />
+
+    <!-- Dual-Line Centered Text: 8dp below cover art, strictly centered horizontally -->
+    <!-- Song Title: 17sp pure white (#FFFFFF), single line marquee -->
     <TextView
         android:id="@+id/tvTitle"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginStart="24dp"
-        android:layout_marginTop="12dp"
+        android:layout_marginTop="8dp"
         android:layout_marginEnd="24dp"
         android:ellipsize="marquee"
         android:focusable="true"
@@ -44,14 +68,14 @@
         android:scrollHorizontally="true"
         android:singleLine="true"
         android:textColor="@color/white"
-        android:textSize="18sp"
+        android:textSize="17sp"
         android:textStyle="bold"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/cardCover"
         tools:text="稻香 (Acoustic)" />
 
-    <!-- Subtitle: 13sp cold grey (#8E8E93), format "歌手 · 专辑", single line ellipsis -->
+    <!-- Subtitle: 12sp cold grey (#8E8E93), format "歌手 · 专辑", single line ellipsis -->
     <TextView
         android:id="@+id/tvArtistAlbum"
         android:layout_width="0dp"
@@ -63,56 +87,60 @@
         android:gravity="center"
         android:singleLine="true"
         android:textColor="@color/text_secondary"
-        android:textSize="13sp"
+        android:textSize="12sp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/tvTitle"
         tools:text="周杰伦 · 魔杰座" />
 
-    <!-- Minimalist 3dp SeekBar: 14dp below subtitle, margins 28dp, height 32dp touch hitbox -->
+    <!-- Refined Minimalist 3dp SeekBar: 26dp hitbox, 3dp thin track, 10dp thumb without clipping -->
     <SeekBar
         android:id="@+id/sbProgress"
         android:layout_width="0dp"
-        android:layout_height="32dp"
-        android:layout_marginStart="28dp"
-        android:layout_marginTop="14dp"
-        android:layout_marginEnd="28dp"
+        android:layout_height="26dp"
+        android:layout_marginStart="20dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="20dp"
         android:max="1000"
-        android:paddingStart="0dp"
-        android:paddingEnd="0dp"
-        android:progressDrawable="@drawable/custom_seekbar_progress"
+        android:maxHeight="3dp"
+        android:minHeight="3dp"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:progressDrawable="@drawable/bg_seekbar_thin_track"
         android:splitTrack="false"
-        android:thumb="@drawable/custom_seekbar_thumb"
+        android:thumb="@drawable/bg_seekbar_thumb"
+        android:thumbOffset="0dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/tvArtistAlbum" />
 
-    <!-- 5 Symmetric Control Buttons: 10dp below seekbar, horizontally distributed -->
-    <!-- Left 1: btnPlayMode (touch target >= 48dp x 48dp) -->
+    <!-- 5 Symmetric Control Buttons: 6dp below seekbar, constrained to bottom of parent -->
+    <!-- Left 1: btnPlayMode (touch target 44dp x 44dp, icon 22dp) -->
     <ImageView
         android:id="@+id/btnPlayMode"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:layout_marginStart="24dp"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_marginStart="16dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="播放模式"
-        android:padding="12dp"
+        android:padding="11dp"
         android:src="@drawable/ic_repeat_all_24"
-        app:layout_constraintBottom_toBottomOf="@+id/btnPlayPause"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toStartOf="@+id/btnPrevious"
         app:layout_constraintHorizontal_chainStyle="spread_inside"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="@+id/btnPlayPause"
+        app:layout_constraintTop_toBottomOf="@+id/sbProgress"
+        app:layout_constraintVertical_bias="0.5"
         app:tint="@color/white" />
 
-    <!-- Left 2: btnPrevious (touch target >= 48dp x 48dp) -->
+    <!-- Left 2: btnPrevious (touch target 44dp x 44dp, icon 22dp) -->
     <ImageView
         android:id="@+id/btnPrevious"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="上一首"
-        android:padding="12dp"
+        android:padding="11dp"
         android:src="@drawable/ic_skip_previous_24"
         app:layout_constraintBottom_toBottomOf="@+id/btnPlayPause"
         app:layout_constraintEnd_toStartOf="@+id/btnPlayPause"
@@ -120,30 +148,32 @@
         app:layout_constraintTop_toTopOf="@+id/btnPlayPause"
         app:tint="@color/white" />
 
-    <!-- Center: btnPlayPause (56dp x 56dp Morandi green circular button @drawable/bg_circle_accent) -->
+    <!-- Center: btnPlayPause (48dp x 48dp Morandi green circular button @drawable/bg_circle_accent) -->
     <ImageView
         android:id="@+id/btnPlayPause"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:layout_marginTop="10dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginTop="6dp"
         android:background="@drawable/bg_circle_accent"
         android:contentDescription="播放暂停"
         android:elevation="2dp"
-        android:padding="14dp"
+        android:padding="12dp"
         android:src="@drawable/ic_play_24"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toStartOf="@+id/btnNext"
         app:layout_constraintStart_toEndOf="@+id/btnPrevious"
         app:layout_constraintTop_toBottomOf="@+id/sbProgress"
+        app:layout_constraintVertical_bias="0.5"
         app:tint="@color/white" />
 
-    <!-- Right 2: btnNext (touch target >= 48dp x 48dp) -->
+    <!-- Right 2: btnNext (touch target 44dp x 44dp, icon 22dp) -->
     <ImageView
         android:id="@+id/btnNext"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="下一首"
-        android:padding="12dp"
+        android:padding="11dp"
         android:src="@drawable/ic_skip_next_24"
         app:layout_constraintBottom_toBottomOf="@+id/btnPlayPause"
         app:layout_constraintEnd_toStartOf="@+id/btnQueue"
@@ -151,15 +181,15 @@
         app:layout_constraintTop_toTopOf="@+id/btnPlayPause"
         app:tint="@color/white" />
 
-    <!-- Right 1: btnQueue (touch target >= 48dp x 48dp) -->
+    <!-- Right 1: btnQueue (touch target 44dp x 44dp, icon 22dp) -->
     <ImageView
         android:id="@+id/btnQueue"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:layout_marginEnd="24dp"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_marginEnd="16dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="播放队列"
-        android:padding="12dp"
+        android:padding="11dp"
         android:src="@drawable/ic_queue_music_24"
         app:layout_constraintBottom_toBottomOf="@+id/btnPlayPause"
         app:layout_constraintEnd_toEndOf="parent"
@@ -167,15 +197,163 @@
         app:layout_constraintTop_toTopOf="@+id/btnPlayPause"
         app:tint="@color/white" />
 
-    <!-- Bottom Status Indicator Capsule: 6dp from bottom edge, centered 18dp x 4dp (corner radius 2dp) in #2ECC71 -->
-    <View
-        android:id="@+id/indicatorCapsule"
-        android:layout_width="18dp"
-        android:layout_height="4dp"
-        android:layout_marginBottom="6dp"
-        android:background="@drawable/bg_indicator_capsule"
+    <!-- Phase 2: Fine Volume Control Overlay (Centered Card with Dimmed Backdrop) -->
+    <FrameLayout
+        android:id="@+id/layoutVolumeOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#99000000"
+        android:clickable="true"
+        android:elevation="10dp"
+        android:focusable="true"
+        android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/cardVolumePanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:background="@drawable/bg_volume_panel"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingStart="12dp"
+            android:paddingTop="12dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="12dp">
+
+            <!-- Title & Percentage Indicator -->
+            <TextView
+                android:id="@+id/tvVolumeTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/accent_green"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent"
+                tools:text="精细音量 75%" />
+
+            <!-- Row 1: Fine Volume Controls [-] [SeekBar 0..100] [+] -->
+            <TextView
+                android:id="@+id/btnVolMinus"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_volume_btn"
+                android:gravity="center"
+                android:text="－"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@+id/tvVolumeTitle" />
+
+            <SeekBar
+                android:id="@+id/sbFineVolume"
+                android:layout_width="0dp"
+                android:layout_height="26dp"
+                android:layout_marginStart="6dp"
+                android:layout_marginEnd="6dp"
+                android:max="100"
+                android:maxHeight="3dp"
+                android:minHeight="3dp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:progressDrawable="@drawable/bg_volume_seek_track"
+                android:splitTrack="false"
+                android:thumb="@drawable/bg_seekbar_thumb"
+                android:thumbOffset="0dp"
+                app:layout_constraintBottom_toBottomOf="@+id/btnVolMinus"
+                app:layout_constraintEnd_toStartOf="@+id/btnVolPlus"
+                app:layout_constraintStart_toEndOf="@+id/btnVolMinus"
+                app:layout_constraintTop_toTopOf="@+id/btnVolMinus" />
+
+            <TextView
+                android:id="@+id/btnVolPlus"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_volume_btn"
+                android:gravity="center"
+                android:text="＋"
+                android:textColor="@color/white"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintTop_toBottomOf="@+id/tvVolumeTitle" />
+
+            <!-- Divider -->
+            <View
+                android:id="@+id/vVolumeDivider"
+                android:layout_width="match_parent"
+                android:layout_height="0.5dp"
+                android:layout_marginTop="10dp"
+                android:background="@color/divider"
+                app:layout_constraintTop_toBottomOf="@+id/btnVolMinus" />
+
+            <!-- Row 2: System Base Volume Controls (AudioManager step) -->
+            <LinearLayout
+                android:id="@+id/layoutSystemVolume"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@+id/vVolumeDivider">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="系统基准: "
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/btnSysVolMinus"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/bg_volume_btn"
+                    android:gravity="center"
+                    android:text="-"
+                    android:textColor="@color/white"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvSystemVolumeText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginEnd="8dp"
+                    android:textColor="@color/white"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    tools:text="10 / 15 格" />
+
+                <TextView
+                    android:id="@+id/btnSysVolPlus"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:background="@drawable/bg_volume_btn"
+                    android:gravity="center"
+                    android:text="+"
+                    android:textColor="@color/white"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
+    </FrameLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

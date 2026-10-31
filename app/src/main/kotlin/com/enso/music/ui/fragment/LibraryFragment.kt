@@ -17,6 +17,7 @@ import com.enso.music.data.db.AppDatabase
 import com.enso.music.data.entity.AlbumItem
 import com.enso.music.data.entity.ArtistItem
 import com.enso.music.data.entity.SongEntity
+import com.enso.music.data.util.PinyinInitialHelper
 import com.enso.music.databinding.FragmentLibraryBinding
 import com.enso.music.ui.MainActivity
 import com.enso.music.ui.adapter.AlbumAdapter
@@ -168,11 +169,13 @@ class LibraryFragment : Fragment() {
     }
 
     private fun scrollToInitial(letter: String) {
-        if (currentTab != Tab.SONGS) return
-        val songs = songAdapter.currentList
-        val index = songs.indexOfFirst { it.sortInitial.equals(letter, ignoreCase = true) }
-        if (index != -1) {
-            (binding.rvLibrary.layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(index, 0)
+        val targetIndex = when (currentTab) {
+            Tab.SONGS -> songAdapter.currentList.indexOfFirst { it.sortInitial.equals(letter, ignoreCase = true) }
+            Tab.ALBUMS -> albumAdapter.currentList.indexOfFirst { it.sortInitial.equals(letter, ignoreCase = true) }
+            Tab.ARTISTS -> artistAdapter.currentList.indexOfFirst { it.sortInitial.equals(letter, ignoreCase = true) }
+        }
+        if (targetIndex != -1) {
+            (binding.rvLibrary.layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(targetIndex, 0)
         }
     }
 
@@ -201,16 +204,24 @@ class LibraryFragment : Fragment() {
         binding.tabArtists.setTypeface(null, if (tab == Tab.ARTISTS) Typeface.BOLD else Typeface.NORMAL)
         binding.indicatorArtists.visibility = if (tab == Tab.ARTISTS) View.VISIBLE else View.INVISIBLE
 
-        // Alphabet index is visible on Songs tab
-        val isSongsTab = (tab == Tab.SONGS)
-        binding.alphabetIndexView.visibility = if (isSongsTab) View.VISIBLE else View.GONE
-        binding.btnOpenAlphabetGrid.visibility = if (isSongsTab) View.VISIBLE else View.GONE
-
         when (tab) {
             Tab.SONGS -> binding.rvLibrary.adapter = songAdapter
             Tab.ALBUMS -> binding.rvLibrary.adapter = albumAdapter
             Tab.ARTISTS -> binding.rvLibrary.adapter = artistAdapter
         }
+
+        updateListVisibility()
+    }
+
+    private fun updateListVisibility() {
+        val (isEmpty, hasItems) = when (currentTab) {
+            Tab.SONGS -> Pair(songAdapter.currentList.isEmpty(), songAdapter.currentList.isNotEmpty())
+            Tab.ALBUMS -> Pair(albumAdapter.currentList.isEmpty(), albumAdapter.currentList.isNotEmpty())
+            Tab.ARTISTS -> Pair(artistAdapter.currentList.isEmpty(), artistAdapter.currentList.isNotEmpty())
+        }
+        binding.layoutEmpty.visibility = if (isEmpty) View.VISIBLE else View.GONE
+        binding.alphabetIndexView.visibility = if (hasItems) View.VISIBLE else View.GONE
+        binding.btnOpenAlphabetGrid.visibility = if (hasItems) View.VISIBLE else View.GONE
     }
 
     private fun observeData() {
@@ -222,22 +233,29 @@ class LibraryFragment : Fragment() {
                 launch {
                     songDao.getAllSongs().collect { songs ->
                         songAdapter.submitList(songs)
-                        if (currentTab == Tab.SONGS) {
-                            binding.layoutEmpty.visibility = if (songs.isEmpty()) View.VISIBLE else View.GONE
-                            val hasSongs = songs.isNotEmpty()
-                            binding.alphabetIndexView.visibility = if (hasSongs) View.VISIBLE else View.GONE
-                            binding.btnOpenAlphabetGrid.visibility = if (hasSongs) View.VISIBLE else View.GONE
-                        }
+                        updateListVisibility()
                     }
                 }
                 launch {
                     songDao.getAllAlbums().collect { albums ->
-                        albumAdapter.submitList(albums)
+                        val sortedAlbums = albums.map { item ->
+                            val initial = PinyinInitialHelper.getInitial(item.album)
+                            val key = PinyinInitialHelper.getSortKey(item.album)
+                            item.withSort(key, initial)
+                        }.sortedWith(compareBy({ it.sortInitial == "#" }, { it.sortKey }))
+                        albumAdapter.submitList(sortedAlbums)
+                        updateListVisibility()
                     }
                 }
                 launch {
                     songDao.getAllArtists().collect { artists ->
-                        artistAdapter.submitList(artists)
+                        val sortedArtists = artists.map { item ->
+                            val initial = PinyinInitialHelper.getInitial(item.artist)
+                            val key = PinyinInitialHelper.getSortKey(item.artist)
+                            item.withSort(key, initial)
+                        }.sortedWith(compareBy({ it.sortInitial == "#" }, { it.sortKey }))
+                        artistAdapter.submitList(sortedArtists)
+                        updateListVisibility()
                     }
                 }
             }
