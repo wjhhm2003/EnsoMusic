@@ -94,7 +94,10 @@ class SongAdapter(
             )
 
             itemView.setOnClickListener {
-                onItemClick(position, song)
+                val adapterPosition = bindingAdapterPosition
+                if (adapterPosition != RecyclerView.NO_POSITION && adapterPosition < currentList.size) {
+                    onItemClick(adapterPosition, currentList[adapterPosition])
+                }
             }
         }
     }
@@ -253,7 +256,10 @@ class QueueAdapter(
             }
 
             itemView.setOnClickListener {
-                onItemClick(position)
+                val adapterPosition = bindingAdapterPosition
+                if (adapterPosition != RecyclerView.NO_POSITION && adapterPosition < items.size) {
+                    onItemClick(adapterPosition)
+                }
             }
         }
     }

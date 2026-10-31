@@ -28,6 +28,8 @@ import com.enso.music.ui.adapter.FolderAdapter
 import com.enso.music.ui.adapter.QueueAdapter
 import com.enso.music.ui.dialog.FolderPickerDialog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -153,18 +155,21 @@ class QueueFolderFragment : Fragment() {
         // Observe Queue from Service
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                (activity as? MainActivity)?.serviceConnectedFlow?.collect { connected ->
+                (activity as? MainActivity)?.serviceConnectedFlow?.collectLatest { connected ->
                     if (connected) {
-                        launch {
-                            getService()?.currentQueue?.collect { queue ->
-                                val curIndex = getService()?.playbackInfo?.value?.currentIndex ?: -1
-                                queueAdapter.updateList(queue, curIndex)
-                                binding.tvEmptyQueue.visibility = if (queue.isEmpty()) View.VISIBLE else View.GONE
+                        val service = getService() ?: return@collectLatest
+                        coroutineScope {
+                            launch {
+                                service.currentQueue.collect { queue ->
+                                    val curIndex = service.playbackInfo.value.currentIndex
+                                    queueAdapter.updateList(queue, curIndex)
+                                    binding.tvEmptyQueue.visibility = if (queue.isEmpty()) View.VISIBLE else View.GONE
+                                }
                             }
-                        }
-                        launch {
-                            getService()?.playbackInfo?.collect { info ->
-                                queueAdapter.setPlayingIndex(info.currentIndex)
+                            launch {
+                                service.playbackInfo.collect { info ->
+                                    queueAdapter.setPlayingIndex(info.currentIndex)
+                                }
                             }
                         }
                     }

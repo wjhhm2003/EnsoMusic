@@ -9,11 +9,14 @@ import com.enso.music.data.entity.SongEntity
 import com.enso.music.data.entity.SongSnapshot
 import com.enso.music.data.util.ArtistParser
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.ArrayDeque
+import java.util.LinkedHashMap
 import java.util.Locale
 
 data class ScanProgress(
@@ -81,14 +84,23 @@ class FolderScanner(private val context: Context) {
             } else {
                 songDao.getAllSongSnapshots().associateBy { it.path }
             }
+            val allKnownPaths = if (isFullRescan) {
+                songDao.getAllSongSnapshots().map { it.path }
+            } else {
+                existingSnapshots.keys.toList()
+            }
 
-            val foundFiles = ArrayList<File>()
+            // A user can select both a folder and one of its descendants. Keep
+            // one entry per canonical path so Room cross-ref inserts cannot hit
+            // duplicate primary keys and metadata is not parsed twice.
+            val foundFilesByPath = LinkedHashMap<String, File>()
             for (folderPath in selectedFolders) {
                 val folder = File(folderPath)
                 if (folder.exists() && folder.isDirectory) {
-                    collectAudioFiles(folder, foundFiles)
+                    collectAudioFiles(folder, foundFilesByPath)
                 }
             }
+            val foundFiles = foundFilesByPath.values.toList()
 
             val foundPathSet = HashSet<String>(foundFiles.size)
             val batchToInsert = ArrayList<SongEntity>(50)
@@ -141,9 +153,11 @@ class FolderScanner(private val context: Context) {
             // Remove deleted files that belonged to scanned folders
             var removedCount = 0
             if (isFullRescan) {
-                // In full rescan, remove any DB song whose path was not found
-                val allCurrentPaths = songDao.getAllSongSnapshots().map { it.path }
-                val toDelete = allCurrentPaths.filter { !foundPathSet.contains(it) }
+                // A full rescan still only owns the selected folders. Do not
+                // delete songs belonging to a folder the user left unselected.
+                val toDelete = allKnownPaths.filter { oldPath ->
+                    isInsideAnySelectedFolder(oldPath, selectedFolders) && !foundPathSet.contains(oldPath)
+                }
                 if (toDelete.isNotEmpty()) {
                     songDao.deleteSongsWithArtists(toDelete)
                     removedCount = toDelete.size
@@ -152,7 +166,7 @@ class FolderScanner(private val context: Context) {
                 val toDelete = ArrayList<String>()
                 for (oldPath in existingSnapshots.keys) {
                     // Check if oldPath is inside one of the scanned folders
-                    val insideScanned = selectedFolders.any { oldPath.startsWith(it) }
+                    val insideScanned = isInsideAnySelectedFolder(oldPath, selectedFolders)
                     if (insideScanned && !foundPathSet.contains(oldPath)) {
                         toDelete.add(oldPath)
                     }
@@ -166,7 +180,9 @@ class FolderScanner(private val context: Context) {
             // Update folder scan times and counts
             val now = System.currentTimeMillis()
             for (folderPath in selectedFolders) {
-                val countInFolder = foundFiles.count { it.absolutePath.startsWith(folderPath) }
+                val countInFolder = foundFiles.count {
+                    isInsideFolder(it.absolutePath, folderPath)
+                }
                 scanFolderDao.updateScanResult(folderPath, now, countInFolder)
             }
 
@@ -177,6 +193,9 @@ class FolderScanner(private val context: Context) {
                 addedOrUpdated = addedOrUpdated,
                 removedCount = removedCount
             )
+        } catch (e: CancellationException) {
+            _scanProgress.value = ScanProgress()
+            throw e
         } catch (e: Exception) {
             _scanProgress.value = ScanProgress(
                 isScanning = false,
@@ -185,23 +204,53 @@ class FolderScanner(private val context: Context) {
         }
     }
 
-    private fun collectAudioFiles(dir: File, result: ArrayList<File>) {
-        val files = dir.listFiles() ?: return
-        for (file in files) {
-            val name = file.name
-            // Skip hidden folders and Android system data directories
-            if (name.startsWith(".") || name.equals("Android", ignoreCase = true)) {
-                continue
-            }
+    private fun collectAudioFiles(dir: File, result: MutableMap<String, File>) {
+        val pending = ArrayDeque<File>()
+        val visitedDirectories = HashSet<String>()
+        pending.add(dir)
 
-            if (file.isDirectory) {
-                collectAudioFiles(file, result)
-            } else if (file.isFile) {
-                val ext = file.extension.lowercase(Locale.ROOT)
-                if (supportedExtensions.contains(ext) && file.length() > 1024) { // filter out 0 or tiny corrupt files
-                    result.add(file)
+        while (pending.isNotEmpty()) {
+            val currentDir = pending.removeFirst()
+            val currentKey = runCatching { currentDir.canonicalPath }
+                .getOrDefault(currentDir.absolutePath)
+            if (!visitedDirectories.add(currentKey)) continue
+
+            val files = try {
+                currentDir.listFiles()
+            } catch (_: SecurityException) {
+                null
+            } ?: continue
+
+            for (file in files) {
+                val name = file.name
+                // Skip hidden folders and Android system data directories.
+                if (name.startsWith(".") || name.equals("Android", ignoreCase = true)) {
+                    continue
+                }
+
+                if (file.isDirectory) {
+                    pending.addLast(file)
+                } else if (file.isFile) {
+                    val ext = file.extension.lowercase(Locale.ROOT)
+                    if (supportedExtensions.contains(ext) && file.length() > 1024) {
+                        val path = runCatching { file.canonicalPath }
+                            .getOrDefault(file.absolutePath)
+                        result.putIfAbsent(path, file)
+                    }
                 }
             }
         }
+    }
+
+    private fun isInsideAnySelectedFolder(path: String, selectedFolders: List<String>): Boolean {
+        return selectedFolders.any { folderPath -> isInsideFolder(path, folderPath) }
+    }
+
+    private fun isInsideFolder(path: String, folderPath: String): Boolean {
+        val normalizedPath = runCatching { File(path).canonicalPath }.getOrDefault(path)
+        val normalizedFolder = runCatching { File(folderPath).canonicalPath }
+            .getOrDefault(folderPath)
+        return normalizedPath == normalizedFolder ||
+                normalizedPath.startsWith(normalizedFolder + File.separator)
     }
 }

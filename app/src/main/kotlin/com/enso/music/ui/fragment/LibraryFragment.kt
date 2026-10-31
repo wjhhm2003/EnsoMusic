@@ -64,10 +64,13 @@ class LibraryFragment : Fragment() {
         val scope = viewLifecycleOwner.lifecycleScope
 
         // All Songs
-        songAdapter = SongAdapter(scope) { index, _ ->
+        songAdapter = SongAdapter(scope) { _, song ->
             val list = songAdapter.currentList
-            (activity as? MainActivity)?.playbackService?.setQueue(list, index, true)
-            (activity as? MainActivity)?.navigateToPage(1)
+            val index = list.indexOfFirst { it.path == song.path }
+            if (index >= 0) {
+                (activity as? MainActivity)?.playbackService?.setQueue(list, index, true)
+                (activity as? MainActivity)?.navigateToPage(1)
+            }
         }
 
         // Albums
@@ -81,9 +84,13 @@ class LibraryFragment : Fragment() {
         }
 
         // Drilldown Songs
-        detailSongAdapter = SongAdapter(scope) { index, _ ->
-            (activity as? MainActivity)?.playbackService?.setQueue(currentDetailSongs, index, true)
-            (activity as? MainActivity)?.navigateToPage(1)
+        detailSongAdapter = SongAdapter(scope) { _, song ->
+            val list = detailSongAdapter.currentList
+            val index = list.indexOfFirst { it.path == song.path }
+            if (index >= 0) {
+                (activity as? MainActivity)?.playbackService?.setQueue(list, index, true)
+                (activity as? MainActivity)?.navigateToPage(1)
+            }
         }
     }
 
@@ -120,8 +127,9 @@ class LibraryFragment : Fragment() {
         }
 
         binding.btnDetailPlayAll.setOnClickListener {
-            if (currentDetailSongs.isNotEmpty()) {
-                (activity as? MainActivity)?.playbackService?.setQueue(currentDetailSongs, 0, true)
+            val list = detailSongAdapter.currentList
+            if (list.isNotEmpty()) {
+                (activity as? MainActivity)?.playbackService?.setQueue(list, 0, true)
                 (activity as? MainActivity)?.navigateToPage(1)
             }
         }

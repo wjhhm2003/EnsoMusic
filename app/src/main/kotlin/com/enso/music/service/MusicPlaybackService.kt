@@ -35,14 +35,9 @@ import com.enso.music.R
 import com.enso.music.data.cover.CoverManager
 import com.enso.music.data.entity.SongEntity
 import com.enso.music.ui.MainActivity
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Collections
 import kotlin.math.pow
@@ -77,7 +72,6 @@ class MusicPlaybackService : Service(),
     }
 
     private val binder = MusicBinder()
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var mediaPlayer: MediaPlayer? = null
@@ -94,6 +88,10 @@ class MusicPlaybackService : Service(),
     private var playMode = PlayMode.LOOP_ALL
     private val shuffleIndices = ArrayList<Int>()
     private var currentShufflePointer = -1
+    private var pendingAutoStart = false
+    private var preparingSongPath: String? = null
+    private var isPreparingSong = false
+    private var isPlayerPrepared = false
 
     private val _playbackInfo = MutableStateFlow(PlaybackInfo())
     val playbackInfo: StateFlow<PlaybackInfo> = _playbackInfo.asStateFlow()
@@ -165,7 +163,13 @@ class MusicPlaybackService : Service(),
     }
 
     private fun initMediaPlayer() {
-        mediaPlayer = MediaPlayer().apply {
+        mediaPlayer = createMediaPlayer()
+        isPlayerPrepared = false
+        applyFineVolume()
+    }
+
+    private fun createMediaPlayer(): MediaPlayer {
+        return MediaPlayer().apply {
             setAudioAttributes(
                 AudioAttributes.Builder()
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
@@ -176,9 +180,9 @@ class MusicPlaybackService : Service(),
             setOnCompletionListener(this@MusicPlaybackService)
             setOnErrorListener(this@MusicPlaybackService)
         }
-        applyFineVolume()
     }
 
+    @Suppress("DEPRECATION")
     private fun initMediaSession() {
         mediaSession = MediaSessionCompat(this, "EnsoMusicSession").apply {
             setFlags(
@@ -289,6 +293,7 @@ class MusicPlaybackService : Service(),
     @Synchronized
     private fun pauseSynchronouslyForAntiLeakage(reason: String) {
         Log.i(TAG, "pauseSynchronouslyForAntiLeakage invoked: $reason")
+        pendingAutoStart = false
         try {
             if (mediaPlayer?.isPlaying == true) {
                 mediaPlayer?.pause()
@@ -297,6 +302,7 @@ class MusicPlaybackService : Service(),
             Log.e(TAG, "Error pausing mediaPlayer", e)
         }
         releaseWakeLock()
+        abandonAudioFocus()
         updatePlaybackState(PlaybackStateCompat.STATE_PAUSED)
         updateNotification()
         publishPlaybackInfo()
@@ -352,7 +358,7 @@ class MusicPlaybackService : Service(),
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                 Log.w(TAG, "AudioFocus transient loss")
                 val wasPlaying = isPlaying()
-                pause()
+                pausePlayback(releaseAudioFocus = false)
                 resumeOnFocusGain = wasPlaying
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
@@ -409,9 +415,22 @@ class MusicPlaybackService : Service(),
         }
 
         try {
-            mediaPlayer?.reset()
-            mediaPlayer?.setDataSource(song.path)
-            mediaPlayer?.prepareAsync()
+            // Give every request its own player so callbacks from a previous
+            // asynchronous prepare cannot advance the new queue.
+            pendingAutoStart = autoStart
+            preparingSongPath = song.path
+            isPreparingSong = true
+            isPlayerPrepared = false
+            releaseWakeLock()
+            val oldPlayer = mediaPlayer
+            val newPlayer = createMediaPlayer()
+            mediaPlayer = newPlayer
+            try {
+                oldPlayer?.release()
+            } catch (ignored: Exception) {
+            }
+            newPlayer.setDataSource(song.path)
+            newPlayer.prepareAsync()
 
             // Update session metadata immediately
             updateSessionMetadata(song)
@@ -424,13 +443,26 @@ class MusicPlaybackService : Service(),
 
     override fun onPrepared(mp: MediaPlayer?) {
         Log.i(TAG, "MediaPlayer prepared")
+        val currentSong = getCurrentSong()
+        if (mp == null || mp !== mediaPlayer || currentSong == null || currentSong.path != preparingSongPath) {
+            Log.w(TAG, "Ignoring stale MediaPlayer prepared callback")
+            return
+        }
+
+        isPreparingSong = false
+        isPlayerPrepared = true
+        val shouldStart = pendingAutoStart
+        pendingAutoStart = false
         applyFineVolume()
-        if (requestAudioFocus()) {
+        if (shouldStart && requestAudioFocus()) {
             mp?.start()
             acquireWakeLock()
             updatePlaybackState(PlaybackStateCompat.STATE_PLAYING)
             startForeground(NOTIFICATION_ID, buildNotification())
         } else {
+            if (!shouldStart) {
+                abandonAudioFocus()
+            }
             updatePlaybackState(PlaybackStateCompat.STATE_PAUSED)
             updateNotification()
         }
@@ -439,6 +471,7 @@ class MusicPlaybackService : Service(),
     }
 
     override fun onCompletion(mp: MediaPlayer?) {
+        if (mp == null || mp !== mediaPlayer || isPreparingSong || !isPlayerPrepared) return
         Log.i(TAG, "MediaPlayer playback completed")
         when (playMode) {
             PlayMode.LOOP_ONE -> {
@@ -463,14 +496,32 @@ class MusicPlaybackService : Service(),
 
     override fun onError(mp: MediaPlayer?, what: Int, extra: Int): Boolean {
         Log.e(TAG, "MediaPlayer error: what=$what, extra=$extra")
+        if (mp != null && mp !== mediaPlayer) return true
+        if (isPreparingSong && preparingSongPath != getCurrentSong()?.path) return true
+        isPreparingSong = false
+        isPlayerPrepared = false
+        pendingAutoStart = false
+        preparingSongPath = null
         releaseWakeLock()
+        abandonAudioFocus()
         updatePlaybackState(PlaybackStateCompat.STATE_ERROR)
         publishPlaybackInfo()
+        // A corrupt or unsupported file should not strand playback. For a
+        // single-item queue, stop instead of looping forever on the same path.
+        if (playlist.size > 1) {
+            skipNext()
+        } else {
+            stop()
+        }
         return true
     }
 
     fun resume() {
         if (playlist.isEmpty()) return
+        if (isPreparingSong) {
+            pendingAutoStart = true
+            return
+        }
         if (currentIndex !in playlist.indices) {
             currentIndex = 0
             prepareSong(playlist[0], true)
@@ -479,6 +530,10 @@ class MusicPlaybackService : Service(),
 
         if (mediaPlayer == null) {
             initMediaPlayer()
+            prepareSong(playlist[currentIndex], true)
+            return
+        }
+        if (!isPlayerPrepared) {
             prepareSong(playlist[currentIndex], true)
             return
         }
@@ -492,7 +547,8 @@ class MusicPlaybackService : Service(),
         }
     }
 
-    fun pause() {
+    private fun pausePlayback(releaseAudioFocus: Boolean) {
+        pendingAutoStart = false
         try {
             if (mediaPlayer?.isPlaying == true) {
                 mediaPlayer?.pause()
@@ -501,10 +557,18 @@ class MusicPlaybackService : Service(),
             Log.e(TAG, "Error in pause()", e)
         }
         releaseWakeLock()
+        if (releaseAudioFocus) {
+            abandonAudioFocus()
+        }
         updatePlaybackState(PlaybackStateCompat.STATE_PAUSED)
         updateNotification()
         publishPlaybackInfo()
         savePreferences()
+    }
+
+    fun pause() {
+        resumeOnFocusGain = false
+        pausePlayback(releaseAudioFocus = true)
     }
 
     fun togglePlayPause() {
@@ -556,18 +620,25 @@ class MusicPlaybackService : Service(),
     }
 
     fun stop() {
+        pendingAutoStart = false
+        preparingSongPath = null
+        isPreparingSong = false
+        isPlayerPrepared = false
         try {
-            if (mediaPlayer?.isPlaying == true) {
-                mediaPlayer?.stop()
+            mediaPlayer?.stop()
+        } catch (ignored: IllegalStateException) {
+            // The player may still be idle or preparing.
+        } finally {
+            try {
+                mediaPlayer?.reset()
+            } catch (ignored: Exception) {
             }
-            mediaPlayer?.reset()
-        } catch (ignored: Exception) {
         }
         releaseWakeLock()
         abandonAudioFocus()
         updatePlaybackState(PlaybackStateCompat.STATE_STOPPED)
         publishPlaybackInfo()
-        stopForeground(true)
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     fun togglePlayMode(): PlayMode {
@@ -581,6 +652,7 @@ class MusicPlaybackService : Service(),
     }
 
     fun isPlaying(): Boolean {
+        if (!isPlayerPrepared) return false
         return try {
             mediaPlayer?.isPlaying == true
         } catch (e: Exception) {
@@ -589,6 +661,7 @@ class MusicPlaybackService : Service(),
     }
 
     fun getPosition(): Long {
+        if (!isPlayerPrepared) return 0L
         return try {
             mediaPlayer?.currentPosition?.toLong() ?: 0L
         } catch (e: Exception) {
@@ -597,6 +670,7 @@ class MusicPlaybackService : Service(),
     }
 
     fun getDuration(): Long {
+        if (!isPlayerPrepared) return 0L
         return try {
             mediaPlayer?.duration?.toLong() ?: 0L
         } catch (e: Exception) {
@@ -822,7 +896,10 @@ class MusicPlaybackService : Service(),
             ACTION_TOGGLE -> togglePlayPause()
             ACTION_NEXT -> skipNext()
             ACTION_PREV -> skipPrevious()
-            ACTION_STOP -> stop()
+            ACTION_STOP -> {
+                stop()
+                stopSelfResult(startId)
+            }
         }
         return START_STICKY
     }
@@ -862,7 +939,6 @@ class MusicPlaybackService : Service(),
         mediaPlayer?.release()
         mediaPlayer = null
         releaseWakeLock()
-        serviceScope.cancel()
         super.onDestroy()
     }
 }

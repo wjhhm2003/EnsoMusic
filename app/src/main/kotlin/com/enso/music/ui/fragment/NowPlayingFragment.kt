@@ -20,7 +20,9 @@ import com.enso.music.service.PlayMode
 import com.enso.music.ui.MainActivity
 import com.enso.music.ui.adapter.FormatUtils
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -41,6 +43,7 @@ class NowPlayingFragment : Fragment() {
     private var currentLyricData: com.enso.music.data.lyric.model.LyricData = com.enso.music.data.lyric.model.LyricData.EMPTY
     private var lyricJob: Job? = null
     private var lyricSyncJob: Job? = null
+    private var lyricLoadToken = 0L
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -156,19 +159,22 @@ class NowPlayingFragment : Fragment() {
     private fun observePlaybackState() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                (activity as? MainActivity)?.serviceConnectedFlow?.collect { connected ->
+                (activity as? MainActivity)?.serviceConnectedFlow?.collectLatest { connected ->
                     if (connected) {
-                        launch {
-                            getService()?.playbackInfo?.collect { info ->
-                                updateUi(info)
+                        val service = getService() ?: return@collectLatest
+                        coroutineScope {
+                            launch {
+                                service.playbackInfo.collect { info ->
+                                    updateUi(info)
+                                }
                             }
-                        }
-                        launch {
-                            getService()?.fineVolumeFlow?.collect { fineVol ->
-                                binding.btnVolumeCapsule.text = "🔊 ${fineVol}%"
-                                binding.tvVolumeTitle.text = "精细音量 ${fineVol}%"
-                                if (binding.sbFineVolume.progress != fineVol) {
-                                    binding.sbFineVolume.progress = fineVol
+                            launch {
+                                service.fineVolumeFlow.collect { fineVol ->
+                                    binding.btnVolumeCapsule.text = "🔊 ${fineVol}%"
+                                    binding.tvVolumeTitle.text = "精细音量 ${fineVol}%"
+                                    if (binding.sbFineVolume.progress != fineVol) {
+                                        binding.sbFineVolume.progress = fineVol
+                                    }
                                 }
                             }
                         }
@@ -337,7 +343,10 @@ class NowPlayingFragment : Fragment() {
 
     private fun loadLyricsForSong(song: SongEntity, forceRefresh: Boolean) {
         lyricJob?.cancel()
+        val loadToken = ++lyricLoadToken
         currentSongPath = song.path
+        currentLyricData = com.enso.music.data.lyric.model.LyricData.EMPTY
+        showLyricEmptyState(true)
         binding.tvLyricSongTitle.text = song.title
         binding.tvLyricSongTitle.isSelected = true
 
@@ -345,7 +354,13 @@ class NowPlayingFragment : Fragment() {
             song = song,
             forceOnlineRefresh = forceRefresh
         ) { lyricData ->
-            if (!isAdded) return@loadLyric
+            // A cancelled network request can still finish on the main
+            // dispatcher. Ignore results for an older song/reload or a view
+            // that has already left the STARTED state.
+            if (!isAdded || _binding == null || loadToken != lyricLoadToken ||
+                currentSongPath != song.path ||
+                !viewLifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            ) return@loadLyric
             currentLyricData = lyricData
             if (lyricData.isEmpty()) {
                 showLyricEmptyState(true)
@@ -539,6 +554,7 @@ class NowPlayingFragment : Fragment() {
         stopLyricSync()
         lyricJob?.cancel()
         lyricJob = null
+        lyricLoadToken++
         volumeAutoHideJob?.cancel()
         volumeAutoHideJob = null
         _binding = null
