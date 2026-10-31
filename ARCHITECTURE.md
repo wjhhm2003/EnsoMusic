@@ -31,79 +31,77 @@ EnsoMusic 是一款专为超低功耗智能手表设备（基于 Android 8.1 / A
 
 ## 2. 系统全景架构图 (Overall Architecture)
 
-EnsoMusic 采用清晰的分层解耦架构，自上而下分为 **表现层 (UI Presentation Layer)**、**领域服务与音频引擎 (Service & Core Engine Layer)**、**歌词子系统 (Lyric Subsystem)** 以及 **数据与存储层 (Data & Persistence Layer)**。
+EnsoMusic 采用清晰的分层解耦架构，自上而下分为 **表现层 (UI Presentation Layer)**、**核心服务与回放引擎层 (Service & Core Playback Layer)**、**歌词处理中枢 (Lyric Engine & Repository)** 以及 **数据与持久化层 (Data & Persistence Layer)**。
+
+架构图严格遵循自顶向下的单向依赖设计，消除了跨层穿透与子图悬空箭头，清晰展示各组件之间的调用与协作关系：
 
 ```mermaid
 flowchart TD
-    subgraph UI ["表现层 (UI Presentation Layer)"]
-        MainActivity["MainActivity<br/>(3-Stage Back Router)"]
-        VP2["ViewPager2 (Screen 0, 1, 2)"]
+    %% 全景分层定义
+    subgraph LayerUI ["1. 表现层 (UI Presentation Layer)"]
+        MainActivity["MainActivity<br/>(3-Stage Back Router 手表侧滑路由)"]
+        VP2["ViewPager2 主容器"]
         
-        subgraph Pages ["三大主屏交互"]
-            P0["LibraryFragment<br/>(歌曲 / 专辑 / 歌手)"]
-            P1["NowPlayingFragment<br/>(封面 / 控制条 / 音量 / 歌词浮层)"]
-            P2["QueueFolderFragment<br/>(实时队列 / 白名单目录)"]
-        end
+        LibFrag["LibraryFragment<br/>(歌曲 / 专辑 / 歌手)"]
+        NowFrag["NowPlayingFragment<br/>(502×410 物理适配 / 细粒度控制)"]
+        QueueFrag["QueueFolderFragment<br/>(实时队列 / 白名单目录)"]
         
-        subgraph CustomViews ["自定义手表优化组件"]
-            LyricView["LyricView (逐行滚动与状态流)"]
-            LyricLineView["LyricLineView (逐字染色 & 跑马滚动)"]
-            AlphabetView["AlphabetIndexView (27键字母索引)"]
-        end
+        AlphaView["AlphabetIndexView<br/>(27键拼音首字母快搜)"]
+        LyricComp["LyricView & LyricLineView<br/>(零GC逐字发光 & 跑马灯滚动)"]
     end
 
-    subgraph ServiceLayer ["领域服务与核心引擎 (Service Layer)"]
-        Service["MusicPlaybackService (前台保活服务)"]
-        PlayerEngine["MediaPlayer 状态机<br/>(MP3/FLAC/OGG/M4A/WAV)"]
-        AudioFocusMgr["AudioManager & AudioFocus<br/>(焦点抢占与瞬时衰减)"]
-        NoisyReceiver["NoisyAudioReceiver<br/>(三层断开防漏音拦截)"]
-        FineVolCtrl["FineVolumeController<br/>(100阶无极软件/硬件平滑音量)"]
+    subgraph LayerService ["2. 核心服务与回放引擎层 (Service & Core Playback Layer)"]
+        Service["MusicPlaybackService<br/>(前台常驻保活服务)"]
+        PlayerEngine["MediaPlayer 状态机<br/>(MP3 / FLAC / OGG / M4A / WAV 解码)"]
+        AntiLeak["三层防漏音安全防线<br/>(NoisyReceiver + AudioFocus 拦截)"]
+        FineVol["FineVolumeController<br/>(100阶无极软硬件平滑音量)"]
     end
 
-    subgraph LyricSystem ["歌词子系统 (Lyric Subsystem)"]
-        LyricMgr["LyricManager (调度总线与内存缓存)"]
-        TtmlParser["TtmlParser (Apple Music TTML / Syllable)"]
-        LrcParser["LrcParser (标准 LRC & 增强逐字 LRC)"]
-        LocalExtractor["LocalLyricExtractor (ID3v2 / Vorbis / MP4 / 同名文件)"]
-        AmllRepo["AmllLyricRepository (AMLL 在线词库 6 级渐进检索)"]
-        DiskCache["TTML 磁盘持久化缓存 (/files/ttml_cache/)"]
+    subgraph LayerLyric ["3. 歌词处理中枢 (Lyric Engine & Repository)"]
+        LyricMgr["LyricManager<br/>(调度总线 & 内存状态缓存)"]
+        LocalExtract["LocalLyricExtractor<br/>(ID3v2 / Vorbis / MP4 / 同名文件提取)"]
+        AmllRepo["AmllLyricRepository<br/>(AMLL 在线词库 6 级渐进检索)"]
+        Parsers["语法解析矩阵<br/>(TtmlParser / LrcParser)"]
+        DiskCache[("TTML 磁盘持久化缓存<br/>/files/ttml_cache/")]
     end
 
-    subgraph DataLayer ["数据与持久化层 (Data & Storage Layer)"]
-        Scanner["FolderScanner (多线程增量文件系统扫描器)"]
-        MetaHelper["MetadataHelper (音轨号解析 / 前导零自愈)"]
-        ArtistParser["ArtistParser (多歌手切分 & 避坑语法分析)"]
-        PinyinHelper["PinyinInitialHelper (汉字首字母极速哈希索引)"]
-        RoomDB[("AppDatabase (Room SQLite)")]
-        Entities["SongEntity / ScanFolderEntity / SongArtistCrossRef"]
+    subgraph LayerData ["4. 数据与持久化层 (Data & Persistence Layer)"]
+        Scanner["FolderScanner<br/>(多线程增量文件系统扫描器)"]
+        ScanUtils["元数据提取套件<br/>(MetadataHelper / ArtistParser / PinyinHelper)"]
+        Daos["DAO 访问接口<br/>(SongDao / ScanFolderDao)"]
+        RoomDB[("AppDatabase<br/>(Room SQLite 数据库)")]
     end
 
+    %% 表现层内部层级
     MainActivity --> VP2
-    VP2 --> P0 & P1 & P2
-    P1 --> CustomViews
-    
-    Pages -.->|IPC / ServiceConnection| Service
+    VP2 --> LibFrag
+    VP2 --> NowFrag
+    VP2 --> QueueFrag
+    LibFrag -.-> AlphaView
+    NowFrag -.-> LyricComp
+
+    %% 表现层 -> 核心服务层
+    NowFrag -->|Binder / ServiceConnection| Service
+    LibFrag -->|播放指令| Service
+    QueueFrag -->|切歌/移除/排序| Service
     Service --> PlayerEngine
-    Service --> AudioFocusMgr
-    Service --> NoisyReceiver
-    Service --> FineVolCtrl
+    Service --> AntiLeak
+    Service --> FineVol
 
-    P1 --> LyricMgr
-    LyricMgr --> DiskCache
-    LyricMgr --> LocalExtractor
+    %% 表现层 & 服务层 -> 歌词处理中枢
+    NowFrag -->|订阅歌词状态流| LyricMgr
+    Service -->|切歌驱动预载| LyricMgr
+    LyricMgr --> LocalExtract
     LyricMgr --> AmllRepo
-    LocalExtractor --> TtmlParser
-    LocalExtractor --> LrcParser
-    AmllRepo --> TtmlParser
-    AmllRepo --> DiskCache
+    LocalExtract --> Parsers
+    AmllRepo --> Parsers
+    AmllRepo -.->|持久化落盘| DiskCache
 
-    Scanner --> MetaHelper
-    Scanner --> ArtistParser
-    Scanner --> PinyinHelper
-    Scanner --> RoomDB
-    RoomDB --> Entities
-    P0 & P2 --> RoomDB
-    Service --> RoomDB
+    %% 业务层 -> 数据与持久化层
+    LibFrag & QueueFrag -->|查询曲库/文件夹| Daos
+    Scanner --> ScanUtils
+    Scanner --> Daos
+    Daos --> RoomDB
 ```
 
 ---
@@ -154,6 +152,27 @@ EnsoMusic 在 `MainActivity` 中建立了三级严格拦截分发机制：
    - `AUDIOFOCUS_LOSS_TRANSIENT`：通知音或语音播报时瞬时暂停；
    - `AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK`：根据系统策略瞬时衰减音量（Duck 音量至 20%），播报完毕后平滑恢复。
 3. **硬件插拔与蓝牙断连主动轮询防线**：在切歌与恢复播放时，二次校验硬件音频路由，确保只有在预期通道就绪时才执行 `start()`。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 用户
+    participant BT as 蓝牙耳机 / 硬件插孔
+    participant OS as Android 系统广播 / AudioManager
+    participant Service as MusicPlaybackService
+    participant Player as MediaPlayer 核心引擎
+    participant UI as NowPlayingFragment
+
+    User->>BT: 突然断开蓝牙连接 / 拔出耳机
+    BT-->>OS: 硬件断连事件
+    OS->>Service: 广播 ACTION_AUDIO_BECOMING_NOISY
+    activate Service
+    Service->>Player: 毫秒级调用 pause() 立即切断输出通道
+    Service->>OS: 放弃临时音频焦点 (abandonAudioFocus)
+    Service-->>UI: 发送 PlaybackState(PAUSED)
+    deactivate Service
+    UI->>UI: 更新播放按钮为暂停态，挂起逐字动画与跑马滚动
+```
 
 #### 3. 100 阶细粒度软件与硬件协同音量控制器 (`FineVolumeController`)
 原生 Android 系统的媒体音量级别通常只有 15 级，在手表低阻抗动圈耳机或睡眠场景下，上一格太响、下一格听不清：
