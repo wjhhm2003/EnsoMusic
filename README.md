@@ -16,6 +16,17 @@ EnsoMusic贴合手表屏幕尺寸，是一个省电、简单、纯粹放歌的�
 > [!IMPORTANT]
 > 本项目完全由 AI 辅助与驱动开发，作者仅负责测试与功能规划，所以代码可能会很烂（ ，欢迎大家提Issue呀
 
+
+## 界面预览
+
+| 歌曲列表 | 歌手视图 | 专辑视图 |
+| :---: | :---: | :---: |
+| <img src="./art/screenshots/01_songs.png" width="180" alt="歌曲列表" /> | <img src="./art/screenshots/02_artists.png" width="180" alt="歌手视图" /> | <img src="./art/screenshots/03_albums.png" width="180" alt="专辑视图" /> |
+| **播放主界面** | **逐字歌词** | **100 级音量** |
+| <img src="./art/screenshots/04_playback.png" width="180" alt="播放主界面" /> | <img src="./art/screenshots/05_lyrics.png" width="180" alt="逐字歌词" /> | <img src="./art/screenshots/06_volume.png" width="180" alt="100 级音量" /> |
+| **专辑详情** | **播放队列** | **目录扫描** |
+| <img src="./art/screenshots/07_album_detail.png" width="180" alt="专辑详情" /> | <img src="./art/screenshots/08_playlist.png" width="180" alt="播放队列" /> | <img src="./art/screenshots/09_scan.png" width="180" alt="目录扫描" /> |
+
 ## 功能
 
 ### 小屏交互与防误触
