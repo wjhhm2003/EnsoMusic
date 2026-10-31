@@ -319,6 +319,19 @@ class LibraryFragment : Fragment() {
         }
     }
 
+    fun handleBackPressed(): Boolean {
+        if (_binding == null) return false
+        if (binding.layoutAlphabetGrid.visibility == View.VISIBLE) {
+            binding.layoutAlphabetGrid.visibility = View.GONE
+            return true
+        }
+        if (binding.layoutDetail.visibility == View.VISIBLE) {
+            binding.layoutDetail.visibility = View.GONE
+            return true
+        }
+        return false
+    }
+
     override fun onDestroyView() {
         _binding = null
         super.onDestroyView()

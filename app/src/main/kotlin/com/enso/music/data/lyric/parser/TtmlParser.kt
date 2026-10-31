@@ -298,23 +298,7 @@ object TtmlParser {
             eventType = parser.next()
         }
 
-        // Space normalization & western word spacing guard
-        for (i in 0 until words.size - 1) {
-            val curWord = words[i]
-            val nextWord = words[i + 1]
-            val curText = curWord.text
-            val nextText = nextWord.text
-
-            if (!curText.endsWith(' ') && !nextText.startsWith(' ')) {
-                val lastChar = curText.lastOrNull() ?: ' '
-                val firstChar = nextText.firstOrNull() ?: ' '
-                val isLastAlphaNum = (lastChar in 'a'..'z' || lastChar in 'A'..'Z' || lastChar in '0'..'9' || lastChar in ",.;:!?\"'")
-                val isFirstAlphaNum = (firstChar in 'a'..'z' || firstChar in 'A'..'Z' || firstChar in '0'..'9')
-                if (isLastAlphaNum && isFirstAlphaNum) {
-                    words[i] = curWord.copy(text = curText + " ")
-                }
-            }
-        }
+        
 
         val fullText = if (words.isNotEmpty()) {
             words.joinToString("") { it.text }.trim()

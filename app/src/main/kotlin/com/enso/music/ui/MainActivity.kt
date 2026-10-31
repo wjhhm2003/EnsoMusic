@@ -42,6 +42,7 @@ class MainActivity : AppCompatActivity() {
     val serviceConnectedFlow: StateFlow<Boolean> = _serviceConnectedFlow.asStateFlow()
 
     private var nowPlayingFragment: NowPlayingFragment? = null
+    private var libraryFragment: LibraryFragment? = null
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -82,7 +83,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupViewPager() {
         val fragments = listOf(
-            LibraryFragment(),
+            LibraryFragment().also { libraryFragment = it },
             NowPlayingFragment().also { nowPlayingFragment = it },
             QueueFolderFragment()
         )
@@ -188,16 +189,33 @@ class MainActivity : AppCompatActivity() {
                 nowPlayingFragment?.showVolumeOverlay()
                 return true
             }
+            KeyEvent.KEYCODE_BACK -> {
+                onBackPressed()
+                return true
+            }
         }
         return super.onKeyDown(keyCode, event)
     }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (nowPlayingFragment?.hideLyricView() == true) {
+        // Priority 1: Handle overlays / secondary views in active fragments
+        if (nowPlayingFragment?.handleBackPressed() == true) {
             return
         }
-        super.onBackPressed()
+        if (libraryFragment?.handleBackPressed() == true) {
+            return
+        }
+
+        // Priority 2: If currently on Page 0 (Library) or Page 2 (Queue/Folders), return to root page (Page 1: Now Playing)
+        if (binding.viewPager.currentItem != 1) {
+            binding.viewPager.setCurrentItem(1, true)
+            return
+        }
+
+        // Priority 3: Only when already on the root interface (Page 1 with zero overlays open)
+        // Return to watch launcher / home screen without terminating background music playback
+        moveTaskToBack(true)
     }
 
     override fun onDestroy() {

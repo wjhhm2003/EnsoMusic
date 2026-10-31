@@ -312,6 +312,19 @@ class NowPlayingFragment : Fragment() {
         startLyricSyncIfNeeded()
     }
 
+    fun handleBackPressed(): Boolean {
+        if (_binding == null) return false
+        if (binding.layoutVolumeOverlay.visibility == View.VISIBLE) {
+            hideVolumeOverlay()
+            return true
+        }
+        if (isLyricShowing) {
+            hideLyricView()
+            return true
+        }
+        return false
+    }
+
     fun hideLyricView(): Boolean {
         if (isLyricShowing) {
             isLyricShowing = false

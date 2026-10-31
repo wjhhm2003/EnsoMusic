@@ -199,13 +199,14 @@ class LyricParserTest {
         assertEquals(1, parsed1.lines.size)
         assertEquals("Datura yellow gazing", parsed1.lines[0].text)
 
-        // Case 2: Spans without whitespace between tags (tightly coupled Latin words)
+        // Case 2: Syllable-level timing inside a word (tightly coupled spans without whitespace)
+        // Must NOT insert spurious spaces between syllables!
         val ttml2 = """
             <tt xmlns="http://www.w3.org/ns/ttml" itunes:timing="Word">
               <body>
                 <div>
                   <p begin="00:01.00" end="00:05.00">
-                    <span begin="00:01.00" end="00:02.00">I</span><span begin="00:02.00" end="00:02.50">see</span><span begin="00:02.50" end="00:03.00">the</span><span begin="00:03.00" end="00:03.50">birth</span>
+                    <span begin="00:01.00" end="00:02.00">para</span><span begin="00:02.00" end="00:02.50">meters </span><span begin="00:02.50" end="00:03.00">crea</span><span begin="00:03.00" end="00:03.50">tion</span>
                   </p>
                 </div>
               </body>
@@ -214,10 +215,10 @@ class LyricParserTest {
 
         val parsed2 = TtmlParser.parse(ttml2)
         assertEquals(1, parsed2.lines.size)
-        assertEquals("I see the birth", parsed2.lines[0].text)
-        assertEquals("I ", parsed2.lines[0].words!![0].text)
-        assertEquals("see ", parsed2.lines[0].words!![1].text)
-        assertEquals("the ", parsed2.lines[0].words!![2].text)
-        assertEquals("birth", parsed2.lines[0].words!![3].text)
+        assertEquals("parameters creation", parsed2.lines[0].text)
+        assertEquals("para", parsed2.lines[0].words!![0].text)
+        assertEquals("meters ", parsed2.lines[0].words!![1].text)
+        assertEquals("crea", parsed2.lines[0].words!![2].text)
+        assertEquals("tion", parsed2.lines[0].words!![3].text)
     }
 }
