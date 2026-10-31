@@ -30,7 +30,8 @@ class LyricView @JvmOverloads constructor(
     var onLineClickListener: ((startTimeMs: Long) -> Unit)? = null
 
     private var lyricData: LyricData = LyricData.EMPTY
-    private var currentActiveIndex = -1
+    private val currentActiveIndices = HashSet<Int>()
+    private var currentFocusIndex = -1
     private var isUserScrolling = false
     private var lastUserTouchTime = 0L
     private val userScrollTimeoutMs = 3000L
@@ -70,7 +71,8 @@ class LyricView @JvmOverloads constructor(
 
     fun setLyricData(data: LyricData) {
         this.lyricData = data
-        this.currentActiveIndex = -1
+        this.currentFocusIndex = -1
+        this.currentActiveIndices.clear()
         adapter.submitList(data.lines)
         if (data.lines.isNotEmpty()) {
             recyclerView.scrollToPosition(0)
@@ -98,41 +100,60 @@ class LyricView @JvmOverloads constructor(
      * Ultra-low power progress updater.
      * Only invalidates the active line view and smooth-scrolls if appropriate.
      */
+    /**
+     * Ultra-low power progress updater with Multi-line Overlap support.
+     * When duet / multi-vocal lines overlap in time, all active lines remain highlighted
+     * and animated simultaneously. The scroll focus stays on the earliest active line
+     * (minHighlighted in AMLL) so that playback never prematurely jumps to the next line.
+     */
     fun updatePlaybackProgress(currentPositionMs: Long) {
         if (lyricData.isEmpty()) return
 
-        val activeIndex = lyricData.findActiveLineIndex(currentPositionMs)
+        val activeList = lyricData.getActiveLineIndices(currentPositionMs)
+        val focusIndex = lyricData.findActiveLineIndex(currentPositionMs)
         val now = System.currentTimeMillis()
         if (isUserScrolling && (now - lastUserTouchTime > userScrollTimeoutMs)) {
             isUserScrolling = false
         }
 
-        if (activeIndex != currentActiveIndex) {
-            val prevIndex = currentActiveIndex
-            currentActiveIndex = activeIndex
+        val newActiveSet = HashSet(activeList)
 
-            // Deactivate previous active view
-            if (prevIndex in 0 until adapter.itemCount) {
-                val prevHolder = recyclerView.findViewHolderForAdapterPosition(prevIndex) as? LyricViewHolder
-                prevHolder?.lineView?.setActiveState(false)
-            }
-
-            // Activate new active view
-            if (currentActiveIndex in 0 until adapter.itemCount) {
-                val newHolder = recyclerView.findViewHolderForAdapterPosition(currentActiveIndex) as? LyricViewHolder
-                newHolder?.lineView?.setActiveState(true)
-                newHolder?.lineView?.updateProgress(currentPositionMs)
-
-                if (!isUserScrolling) {
-                    smoothScrollToLine(currentActiveIndex)
+        // 1. Deactivate lines that have ended
+        for (idx in currentActiveIndices) {
+            if (!newActiveSet.contains(idx)) {
+                if (idx in 0 until adapter.itemCount) {
+                    val holder = recyclerView.findViewHolderForAdapterPosition(idx) as? LyricViewHolder
+                    holder?.lineView?.setActiveState(false)
                 }
             }
-        } else if (currentActiveIndex in 0 until adapter.itemCount) {
-            // Same line: update progress only if word-timed for karaoke
-            val currentLine = lyricData.lines.getOrNull(currentActiveIndex)
-            if (currentLine != null && (currentLine.isWordTimed || !currentLine.bgVocals.isNullOrEmpty() || !currentLine.rubyList.isNullOrEmpty())) {
-                val holder = recyclerView.findViewHolderForAdapterPosition(currentActiveIndex) as? LyricViewHolder
+        }
+
+        // 2. Activate newly started lines
+        for (idx in newActiveSet) {
+            if (!currentActiveIndices.contains(idx)) {
+                if (idx in 0 until adapter.itemCount) {
+                    val holder = recyclerView.findViewHolderForAdapterPosition(idx) as? LyricViewHolder
+                    holder?.lineView?.setActiveState(true)
+                }
+            }
+        }
+
+        // 3. Update word-timing karaoke progress on all currently active lines
+        for (idx in newActiveSet) {
+            if (idx in 0 until adapter.itemCount) {
+                val holder = recyclerView.findViewHolderForAdapterPosition(idx) as? LyricViewHolder
                 holder?.lineView?.updateProgress(currentPositionMs)
+            }
+        }
+
+        currentActiveIndices.clear()
+        currentActiveIndices.addAll(newActiveSet)
+
+        // 4. Smooth-scroll only when focus line changes and user is not manually scrolling
+        if (focusIndex != currentFocusIndex) {
+            currentFocusIndex = focusIndex
+            if (!isUserScrolling && focusIndex in 0 until adapter.itemCount) {
+                smoothScrollToLine(focusIndex)
             }
         }
     }
@@ -181,7 +202,7 @@ class LyricView @JvmOverloads constructor(
 
         override fun onBindViewHolder(holder: LyricViewHolder, position: Int) {
             val line = lines[position]
-            val isActive = (position == currentActiveIndex)
+            val isActive = currentActiveIndices.contains(position)
             holder.lineView.showTranslation = showTranslation
             holder.lineView.showTransliteration = showTransliteration
             holder.lineView.bind(line, isActive, 0L)

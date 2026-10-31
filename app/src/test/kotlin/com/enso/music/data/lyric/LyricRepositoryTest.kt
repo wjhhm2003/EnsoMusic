@@ -60,4 +60,49 @@ class LyricRepositoryTest {
         assertEquals(3, lyricData.findActiveLineIndex(40000L)) // exact fourth line
         assertEquals(3, lyricData.findActiveLineIndex(99999L)) // past last line
     }
+
+    @Test
+    fun testOverlappingLinesDuetBehavior() {
+        val ttml = """
+            <tt xmlns="http://www.w3.org/ns/ttml"
+                xmlns:ttm="http://www.w3.org/ns/ttml#metadata"
+                xmlns:itunes="http://music.apple.com/lyric-ttml"
+                itunes:timing="Word">
+              <body>
+                <div>
+                  <p begin="00:10.000" end="00:16.000" ttm:agent="v1">
+                    <span begin="00:10.000" end="00:16.000">Frozen into icy rocks, that's how it starts</span>
+                  </p>
+                  <p begin="00:13.000" end="00:18.000" ttm:agent="v2">
+                    <span begin="00:13.000" end="00:18.000">That's how it starts</span>
+                  </p>
+                </div>
+              </body>
+            </tt>
+        """.trimIndent()
+
+        val lyricData = com.enso.music.data.lyric.parser.TtmlParser.parse(ttml)
+        assertEquals(2, lyricData.lines.size)
+        val line1 = lyricData.lines[0]
+        val line2 = lyricData.lines[1]
+
+        // Verify intentional overlap is preserved
+        assertEquals(10000L, line1.startTimeMs)
+        assertEquals(16000L, line1.endTimeMs)
+        assertEquals(13000L, line2.startTimeMs)
+        assertEquals(18000L, line2.endTimeMs)
+
+        // At 14000ms (during overlapping duet singing):
+        // 1. Both lines MUST be active simultaneously
+        val activeIndices = lyricData.getActiveLineIndices(14000L)
+        assertEquals(listOf(0, 1), activeIndices)
+
+        // 2. Focus index MUST stay on line1 until line1 finishes (prevent premature jumping)
+        assertEquals(0, lyricData.findActiveLineIndex(14000L))
+
+        // At 16500ms (after line1 finishes, line2 continues):
+        // Focus moves smoothly to line2
+        assertEquals(1, lyricData.findActiveLineIndex(16500L))
+        assertEquals(listOf(1), lyricData.getActiveLineIndices(16500L))
+    }
 }

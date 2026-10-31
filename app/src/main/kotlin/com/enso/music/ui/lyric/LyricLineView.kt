@@ -192,7 +192,13 @@ class LyricLineView @JvmOverloads constructor(
         // Calculate alignment start X
         val mainStartX = when (line.alignment) {
             LyricAlignment.LEFT -> paddingHorizontal.toFloat()
-            LyricAlignment.RIGHT -> availableWidth - paddingHorizontal - totalMainWidth
+            LyricAlignment.RIGHT -> {
+                if (totalMainWidth > usableWidth) {
+                    paddingHorizontal.toFloat()
+                } else {
+                    availableWidth - paddingHorizontal - totalMainWidth
+                }
+            }
             LyricAlignment.CENTER -> {
                 if (totalMainWidth > usableWidth) {
                     paddingHorizontal.toFloat()
@@ -250,8 +256,20 @@ class LyricLineView @JvmOverloads constructor(
 
                 val bgStartX = when (line.alignment) {
                     LyricAlignment.LEFT -> paddingHorizontal.toFloat()
-                    LyricAlignment.RIGHT -> availableWidth - paddingHorizontal - totalBgWidth
-                    LyricAlignment.CENTER -> (availableWidth - totalBgWidth) / 2f
+                    LyricAlignment.RIGHT -> {
+                        if (totalBgWidth > usableWidth) {
+                            paddingHorizontal.toFloat()
+                        } else {
+                            availableWidth - paddingHorizontal - totalBgWidth
+                        }
+                    }
+                    LyricAlignment.CENTER -> {
+                        if (totalBgWidth > usableWidth) {
+                            paddingHorizontal.toFloat()
+                        } else {
+                            (availableWidth - totalBgWidth) / 2f
+                        }
+                    }
                 }
 
                 var rX = bgStartX
@@ -363,7 +381,9 @@ class LyricLineView @JvmOverloads constructor(
             val lineW = p.measureText(line.text)
             val lineStartX = when (line.alignment) {
                 LyricAlignment.LEFT -> paddingHorizontal
-                LyricAlignment.RIGHT -> width - paddingHorizontal - lineW
+                LyricAlignment.RIGHT -> {
+                    if (lineW > usableWidth) paddingHorizontal else width - paddingHorizontal - lineW
+                }
                 LyricAlignment.CENTER -> {
                     if (lineW > usableWidth) paddingHorizontal else (width - lineW) / 2f
                 }
@@ -399,10 +419,12 @@ class LyricLineView @JvmOverloads constructor(
             val p = if (isCurrentActiveLine) paintBgHighlight else paintBgNormal
             val bgText = "(${bg.text})"
             val bgW = p.measureText(bgText)
+            val bgMaxScroll = (bgW - usableWidth).coerceAtLeast(0f)
+            val bgScroll = if (isCurrentActiveLine) bgMaxScroll * lineProgress else 0f
             val bgStartX = when (line.alignment) {
-                LyricAlignment.LEFT -> paddingHorizontal
-                LyricAlignment.RIGHT -> width - paddingHorizontal - bgW
-                LyricAlignment.CENTER -> if (bgW > usableWidth) paddingHorizontal else (width - bgW) / 2f
+                LyricAlignment.LEFT -> paddingHorizontal - bgScroll
+                LyricAlignment.RIGHT -> if (bgW > usableWidth) paddingHorizontal - bgScroll else width - paddingHorizontal - bgW
+                LyricAlignment.CENTER -> if (bgW > usableWidth) paddingHorizontal - bgScroll else (width - bgW) / 2f
             }
             canvas.drawText(bgText, bgStartX, bgBaselineY, p)
         }
@@ -415,7 +437,7 @@ class LyricLineView @JvmOverloads constructor(
             val romanScroll = if (isCurrentActiveLine) romanMaxScroll * lineProgress else 0f
             val romanStartX = when (line.alignment) {
                 LyricAlignment.LEFT -> paddingHorizontal - romanScroll
-                LyricAlignment.RIGHT -> width - paddingHorizontal - romanW
+                LyricAlignment.RIGHT -> if (romanW > usableWidth) paddingHorizontal - romanScroll else width - paddingHorizontal - romanW
                 LyricAlignment.CENTER -> if (romanW > usableWidth) paddingHorizontal - romanScroll else (width - romanW) / 2f
             }
             canvas.drawText(roman, romanStartX, romanBaselineY, paintSub)
@@ -429,7 +451,7 @@ class LyricLineView @JvmOverloads constructor(
             val transScroll = if (isCurrentActiveLine) transMaxScroll * lineProgress else 0f
             val transStartX = when (line.alignment) {
                 LyricAlignment.LEFT -> paddingHorizontal - transScroll
-                LyricAlignment.RIGHT -> width - paddingHorizontal - transW
+                LyricAlignment.RIGHT -> if (transW > usableWidth) paddingHorizontal - transScroll else width - paddingHorizontal - transW
                 LyricAlignment.CENTER -> if (transW > usableWidth) paddingHorizontal - transScroll else (width - transW) / 2f
             }
             canvas.drawText(trans, transStartX, transBaselineY, paintSub)

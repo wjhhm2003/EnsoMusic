@@ -98,8 +98,19 @@ object TtmlParser {
             eventType = parser.next()
         }
 
-        // Sort lines by startTime
-        lines.sortBy { it.startTimeMs }
+        // Sort lines by startTime stably with original index
+        lines.sortWith(compareBy({ it.startTimeMs }, { it.index }))
+
+        // Clean unintentional overlaps (< 100ms) while strictly preserving intentional multi-singer overlaps
+        // as per Apple Music & AMLL specification
+        for (i in 0 until lines.size - 1) {
+            val cur = lines[i]
+            val next = lines[i + 1]
+            val overlap = cur.endTimeMs - next.startTimeMs
+            if (overlap in 1..99) {
+                lines[i] = cur.copy(endTimeMs = next.startTimeMs)
+            }
+        }
 
         // Recalculate end times if 0 or invalid
         for (i in lines.indices) {
