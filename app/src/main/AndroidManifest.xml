@@ -18,6 +18,7 @@
         android:label="@string/app_name"
         android:roundIcon="@drawable/ic_enso_logo"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.EnsoMusic">
 
         <activity

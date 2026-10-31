@@ -132,6 +132,7 @@ class MusicPlaybackService : Service(),
         restorePreferences()
 
         registerTripleBluetoothGuards()
+        startForeground(NOTIFICATION_ID, buildNotification())
     }
 
     private fun initWakeLock() {
@@ -814,6 +815,7 @@ class MusicPlaybackService : Service(),
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForeground(NOTIFICATION_ID, buildNotification())
         when (intent?.action) {
             ACTION_PLAY -> resume()
             ACTION_PAUSE -> pause()

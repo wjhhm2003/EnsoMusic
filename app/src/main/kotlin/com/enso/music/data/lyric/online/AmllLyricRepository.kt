@@ -41,18 +41,28 @@ class AmllLyricRepository(private val context: Context) {
     private fun isNetworkConnected(): Boolean {
         return try {
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-                ?: return false
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                val net = cm.activeNetwork ?: return false
-                val caps = cm.getNetworkCapabilities(net) ?: return false
-                caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            } else {
-                @Suppress("DEPRECATION")
-                val activeInfo = cm.activeNetworkInfo
-                activeInfo != null && activeInfo.isConnected
+                ?: return true
+            @Suppress("DEPRECATION")
+            val activeInfo = cm.activeNetworkInfo
+            if (activeInfo != null && activeInfo.isConnectedOrConnecting) {
+                return true
             }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val net = cm.activeNetwork
+                if (net != null) {
+                    val caps = cm.getNetworkCapabilities(net)
+                    if (caps != null && (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+                                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))) {
+                        return true
+                    }
+                }
+            }
+            // In emulator or special wear environment, fall back to optimistic true
+            true
         } catch (e: Exception) {
-            false
+            true // Optimistically proceed with HTTP if check fails
         }
     }
 
@@ -66,13 +76,17 @@ class AmllLyricRepository(private val context: Context) {
      */
     fun fetchAndCacheTtml(song: SongEntity, forceRefresh: Boolean = false): LyricData? {
         val targetCacheFile = getCacheFile(song.path)
+        Log.i(TAG, "fetchAndCacheTtml called for '${song.title}' by '${song.artist}', forceRefresh=$forceRefresh")
 
         // 1. If not forcing refresh and cache already exists, load cached directly
         if (!forceRefresh && targetCacheFile.exists() && targetCacheFile.length() > 0) {
             try {
                 val text = targetCacheFile.readText(Charsets.UTF_8)
                 val parsed = TtmlParser.parse(text)
-                if (parsed.isNotEmpty()) return parsed
+                if (parsed.isNotEmpty()) {
+                    Log.i(TAG, "Loaded lyric directly from local cache for '${song.title}'")
+                    return parsed
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed reading cached ttml: ${e.message}")
             }
@@ -80,6 +94,7 @@ class AmllLyricRepository(private val context: Context) {
 
         // 2. Check network connectivity
         if (!isNetworkConnected()) {
+            Log.w(TAG, "No network connection detected. Skipping online fetch.")
             return null
         }
 
@@ -96,17 +111,20 @@ class AmllLyricRepository(private val context: Context) {
         try {
             val ttmlContent = searchTtmlFromAmll(song)
             if (!ttmlContent.isNullOrBlank()) {
+                Log.i(TAG, "Successfully acquired TTML lyric for '${song.title}' (${ttmlContent.length} chars)")
                 // Persistent write
+                targetCacheFile.parentFile?.mkdirs()
                 targetCacheFile.writeText(ttmlContent, Charsets.UTF_8)
                 // Clear negative cache
                 prefs.edit().remove(negKey).apply()
                 return TtmlParser.parse(ttmlContent)
             } else {
+                Log.i(TAG, "No TTML lyric found on AMLL for '${song.title}'")
                 // Negative cache mark
                 prefs.edit().putLong(negKey, now).apply()
             }
         } catch (e: Exception) {
-            Log.w(TAG, "AMLL request failed: ${e.message}")
+            Log.w(TAG, "AMLL request failed: ${e.message}", e)
         }
 
         return null
@@ -117,57 +135,104 @@ class AmllLyricRepository(private val context: Context) {
         val cleanArtist = cleanSearchKeyword(song.artist.split('/', '&', ',', ';').firstOrNull() ?: song.artist)
         val cleanAlbum = cleanSearchKeyword(song.album)
 
-        val queryParams = StringBuilder("musicName=${encodeParam(cleanTitle)}&page=1&pageSize=5")
+        Log.i(TAG, "Searching AMLL for title='$cleanTitle', artist='$cleanArtist', album='$cleanAlbum'")
+
+        // Attempt 1: Search with title + artist
+        var result = executeAmllSearch(cleanTitle, cleanArtist, cleanAlbum, song.duration)
+        if (result != null) return result
+
+        // Attempt 2: Fallback search with title only
         if (cleanArtist.isNotBlank() && cleanArtist != "未知歌手") {
-            queryParams.append("&artistName=${encodeParam(cleanArtist)}")
+            Log.i(TAG, "Artist search yielded no result, retrying with title only: '$cleanTitle'")
+            result = executeAmllSearch(cleanTitle, "", "", song.duration)
+            if (result != null) return result
         }
-        if (cleanAlbum.isNotBlank() && cleanAlbum != "未知专辑") {
-            queryParams.append("&albumName=${encodeParam(cleanAlbum)}")
+
+        // Attempt 3: LrcLib compatibility fallback
+        return tryLrcLibFallback(song, cleanTitle, cleanArtist, cleanAlbum)
+    }
+
+    private fun executeAmllSearch(
+        title: String,
+        artist: String,
+        album: String,
+        songDurationMs: Long
+    ): String? {
+        val queryParams = StringBuilder("musicName=${encodeParam(title)}&page=1&pageSize=5")
+        if (artist.isNotBlank() && artist != "未知歌手") {
+            queryParams.append("&artistName=${encodeParam(artist)}")
+        }
+        if (album.isNotBlank() && album != "未知专辑") {
+            queryParams.append("&albumName=${encodeParam(album)}")
         }
 
         val searchUrl = "$BASE_URL/v1/lyrics/search?$queryParams"
-        val jsonResponse = httpGet(searchUrl) ?: return tryLrcLibFallback(song, cleanTitle, cleanArtist, cleanAlbum)
+        Log.d(TAG, "HTTP GET search: $searchUrl")
+        val jsonResponse = httpGet(searchUrl) ?: return null
 
-        val rootObj = JSONObject(jsonResponse)
-        val dataArray = rootObj.optJSONArray("data") ?: return null
+        return parseAmllSearchResponse(jsonResponse, title, songDurationMs)
+    }
 
-        val localDurationSec = (song.duration / 1000).toInt()
+    fun parseAmllSearchResponse(jsonResponse: String, queryTitle: String, songDurationMs: Long): String? {
+        return try {
+            val rootObj = JSONObject(jsonResponse)
+            val dataArray = when {
+                rootObj.optJSONArray("data") != null -> rootObj.optJSONArray("data")
+                rootObj.optJSONObject("data")?.optJSONArray("items") != null -> rootObj.optJSONObject("data")?.optJSONArray("items")
+                rootObj.optJSONArray("items") != null -> rootObj.optJSONArray("items")
+                else -> null
+            } ?: return null
 
-        for (i in 0 until dataArray.length()) {
-            val item = dataArray.optJSONObject(i) ?: continue
-            val itemDuration = item.optInt("duration", 0)
+            Log.d(TAG, "Search response items count: ${dataArray.length()}")
+            val localDurationSec = (songDurationMs / 1000).toInt()
 
-            // Duration tolerance check (+/- 8s) if durations are known
-            if (localDurationSec > 0 && itemDuration > 0) {
-                if (abs(localDurationSec - itemDuration) > 8) {
-                    continue
+            for (i in 0 until dataArray.length()) {
+                val item = dataArray.optJSONObject(i) ?: continue
+                val itemDuration = item.optInt("duration", 0)
+
+                // If duration is provided on item, perform relaxed tolerance check (up to 25s)
+                if (localDurationSec > 0 && itemDuration > 0) {
+                    if (abs(localDurationSec - itemDuration) > 25) {
+                        Log.d(TAG, "Item duration $itemDuration mismatch with local $localDurationSec (> 25s), skipping.")
+                        continue
+                    }
                 }
-            }
 
-            // Extract inline ttml if available
-            val ttml = item.optString("ttml", "")
-            if (ttml.isNotBlank() && ttml.contains("<tt", ignoreCase = true)) {
-                return ttml
-            }
+                // Check inline lyrics/ttml
+                val inlineTtml = item.optString("lyrics", "").ifBlank {
+                    item.optString("ttml", "").ifBlank { item.optString("content", "") }
+                }
+                if (inlineTtml.isNotBlank() && inlineTtml.contains("<tt", ignoreCase = true)) {
+                    Log.i(TAG, "Found inline TTML in search item #$i")
+                    return inlineTtml
+                }
 
-            // Otherwise fetch full details by ID
-            val id = item.optString("id", "")
-            if (id.isNotBlank()) {
-                val detailUrl = "$BASE_URL/v1/lyrics/get?id=${encodeParam(id)}"
-                val detailResp = httpGet(detailUrl)
-                if (detailResp != null) {
-                    val detailObj = JSONObject(detailResp)
-                    val detailData = detailObj.optJSONObject("data") ?: detailObj
-                    val fetchedTtml = detailData.optString("ttml", "")
-                    if (fetchedTtml.isNotBlank() && fetchedTtml.contains("<tt", ignoreCase = true)) {
-                        return fetchedTtml
+                // Otherwise fetch detail by id
+                val id = item.optString("id", "")
+                if (id.isNotBlank()) {
+                    val detailUrl = "$BASE_URL/v1/lyrics/get?id=${encodeParam(id)}"
+                    Log.d(TAG, "Fetching full detail: $detailUrl")
+                    val detailResp = httpGet(detailUrl)
+                    if (detailResp != null) {
+                        val detailObj = JSONObject(detailResp)
+                        val detailData = detailObj.optJSONObject("data") ?: detailObj
+                        val fetched = detailData.optString("lyrics", "").ifBlank {
+                            detailData.optString("ttml", "").ifBlank {
+                                detailData.optString("content", "")
+                            }
+                        }
+                        if (fetched.isNotBlank() && fetched.contains("<tt", ignoreCase = true)) {
+                            Log.i(TAG, "Successfully fetched TTML by ID: $id")
+                            return fetched
+                        }
                     }
                 }
             }
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Error parsing search response: ${e.message}")
+            null
         }
-
-        // If primary search returned no valid TTML, attempt lrclib compatibility fallback
-        return tryLrcLibFallback(song, cleanTitle, cleanArtist, cleanAlbum)
     }
 
     private fun tryLrcLibFallback(song: SongEntity, title: String, artist: String, album: String): String? {
@@ -187,7 +252,9 @@ class AmllLyricRepository(private val context: Context) {
             val url = "$BASE_URL/v1/lrclib/get?$queryParams"
             val resp = httpGet(url) ?: return null
             val obj = JSONObject(resp)
-            val ttml = obj.optString("ttml", "")
+            val ttml = obj.optString("lyrics", "").ifBlank {
+                obj.optString("ttml", "").ifBlank { obj.optString("content", "") }
+            }
             if (ttml.isNotBlank() && ttml.contains("<tt", ignoreCase = true)) {
                 ttml
             } else null

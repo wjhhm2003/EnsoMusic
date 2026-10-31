@@ -41,13 +41,15 @@ class LyricManager private constructor(context: Context) {
         val cacheKey = song.path
 
         return scope.launch {
+            val hasPhysicalTtml = localExtractor.hasLocalTtmlFile(song.path)
+
             if (!forceOnlineRefresh) {
                 val cachedInMemory = memoryCache.get(cacheKey)
                 if (cachedInMemory != null) {
                     withContext(Dispatchers.Main) {
                         onLyricLoaded(cachedInMemory)
                     }
-                    if (cachedInMemory.hasWordTiming) {
+                    if (hasPhysicalTtml) {
                         return@launch
                     }
                 }
@@ -60,8 +62,8 @@ class LyricManager private constructor(context: Context) {
                 withContext(Dispatchers.Main) {
                     onLyricLoaded(localResult)
                 }
-                // If local is already TTML with word-level timing, we are done
-                if (localResult.hasWordTiming) {
+                // If local already has a physical .ttml file, we are done
+                if (hasPhysicalTtml) {
                     return@launch
                 }
             }

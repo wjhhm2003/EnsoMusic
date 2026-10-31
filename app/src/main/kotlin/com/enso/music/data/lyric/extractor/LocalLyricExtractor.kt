@@ -30,6 +30,23 @@ class LocalLyricExtractor(private val context: Context) {
     }
 
     /**
+     * Checks whether a physical .ttml file exists locally (sibling or cached).
+     */
+    fun hasLocalTtmlFile(songPath: String): Boolean {
+        val audioFile = File(songPath)
+        val parentDir = audioFile.parentFile
+        val nameWithoutExt = audioFile.nameWithoutExtension
+
+        if (parentDir != null && parentDir.exists()) {
+            val siblingTtml = File(parentDir, "$nameWithoutExt.ttml")
+            if (siblingTtml.exists() && siblingTtml.length() > 0) return true
+        }
+
+        val cachedTtml = getCachedTtmlFile(songPath)
+        return cachedTtml.exists() && cachedTtml.length() > 0
+    }
+
+    /**
      * Loads lyric strictly from local disk or embedded metadata without network access.
      * Priority:
      * 1. Sibling .ttml file

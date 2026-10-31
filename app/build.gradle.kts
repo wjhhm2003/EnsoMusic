@@ -81,4 +81,5 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("net.sf.kxml:kxml2:2.3.0")
     testImplementation("xmlpull:xmlpull:1.1.3.1")
+    testImplementation("org.json:json:20240303")
 }
