@@ -32,43 +32,43 @@
             android:src="@drawable/ic_music_note_24" />
     </androidx.cardview.widget.CardView>
 
-    <!-- Top Left: Lyric Shortcut Capsule (touch target >= 44dp x 30dp) -->
+    <!-- Left side of Cover: Lyric Shortcut Capsule -->
     <TextView
         android:id="@+id/btnLyricCapsule"
         android:layout_width="wrap_content"
-        android:layout_height="30dp"
-        android:layout_marginTop="2dp"
-        android:layout_marginStart="10dp"
+        android:layout_height="32dp"
         android:background="@drawable/bg_volume_capsule"
         android:gravity="center"
-        android:minWidth="44dp"
+        android:minWidth="38dp"
         android:paddingStart="8dp"
         android:paddingEnd="8dp"
         android:text="词"
         android:textColor="@color/white"
-        android:textSize="11sp"
+        android:textSize="12sp"
         android:textStyle="bold"
+        app:layout_constraintBottom_toBottomOf="@+id/cardCover"
+        app:layout_constraintEnd_toStartOf="@+id/cardCover"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toTopOf="@+id/cardCover" />
 
-    <!-- Top Right: Volume Shortcut Capsule (touch target >= 48dp x 32dp) -->
+    <!-- Right side of Cover: Volume Shortcut Capsule -->
     <TextView
         android:id="@+id/btnVolumeCapsule"
         android:layout_width="wrap_content"
-        android:layout_height="30dp"
-        android:layout_marginTop="2dp"
-        android:layout_marginEnd="10dp"
+        android:layout_height="32dp"
         android:background="@drawable/bg_volume_capsule"
         android:gravity="center"
-        android:minWidth="48dp"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
+        android:minWidth="46dp"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
         android:textColor="@color/white"
         android:textSize="11sp"
         android:textStyle="bold"
+        app:layout_constraintBottom_toBottomOf="@+id/cardCover"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        tools:text="🔊 100%" />
+        app:layout_constraintStart_toEndOf="@+id/cardCover"
+        app:layout_constraintTop_toTopOf="@+id/cardCover"
+        tools:text="🔊 75%" />
 
     <!-- Dual-Line Centered Text: 8dp below cover art, strictly centered horizontally -->
     <!-- Song Title: 18sp pure white (#FFFFFF), bold, single line marquee -->

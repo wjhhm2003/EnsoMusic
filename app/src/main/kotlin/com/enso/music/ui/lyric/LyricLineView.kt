@@ -19,7 +19,6 @@ class LyricLineView @JvmOverloads constructor(
     }
     private val paintHighlight = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.parseColor("#FFFFFF") // 100% solid white
-        isFakeBoldText = true
     }
 
     private val paintBgNormal = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -91,12 +90,13 @@ class LyricLineView @JvmOverloads constructor(
     private var bgBaselineY = 0f
     private var romanBaselineY = 0f
     private var transBaselineY = 0f
+    private var totalMainWidth = 0f
     private var measuredContentHeight = 0
 
     init {
         val density = resources.displayMetrics.scaledDensity
         paintNormal.textSize = 16f * density
-        paintHighlight.textSize = 17f * density
+        paintHighlight.textSize = 16f * density
         paintBgNormal.textSize = 12f * density
         paintBgHighlight.textSize = 12f * density
         paintRubyNormal.textSize = 8.5f * density
@@ -187,11 +187,19 @@ class LyricLineView @JvmOverloads constructor(
             totalMainWidth = activePaint.measureText(line.text)
         }
 
+        this.totalMainWidth = totalMainWidth
+
         // Calculate alignment start X
         val mainStartX = when (line.alignment) {
             LyricAlignment.LEFT -> paddingHorizontal.toFloat()
             LyricAlignment.RIGHT -> availableWidth - paddingHorizontal - totalMainWidth
-            LyricAlignment.CENTER -> (availableWidth - totalMainWidth) / 2f
+            LyricAlignment.CENTER -> {
+                if (totalMainWidth > usableWidth) {
+                    paddingHorizontal.toFloat()
+                } else {
+                    (availableWidth - totalMainWidth) / 2f
+                }
+            }
         }
 
         // Position words
@@ -299,7 +307,21 @@ class LyricLineView @JvmOverloads constructor(
             canvas.drawText(part.uppercase(), pillLeft + 6f * density, pTextY, paintPillText)
         }
 
-        // 2. Draw Ruby annotations
+        val usableWidth = (width - 2 * paddingHorizontal).coerceAtLeast(0f)
+        val maxScroll = (totalMainWidth - usableWidth).coerceAtLeast(0f)
+        val lineProgress = if (maxScroll > 0f && isCurrentActiveLine) {
+            val dur = (line.endTimeMs - line.startTimeMs).coerceAtLeast(1L)
+            ((currentTimeMs - line.startTimeMs).toFloat() / dur).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        val scrollOffset = maxScroll * lineProgress
+
+        // 2. Draw Ruby annotations (wrapped in scroll translation)
+        canvas.save()
+        if (scrollOffset > 0f) {
+            canvas.translate(-scrollOffset, 0f)
+        }
         for (rm in rubyMetricList) {
             val isRubyActive = isCurrentActiveLine && currentTimeMs in rm.startTimeMs..rm.endTimeMs
             val p = if (isRubyActive) paintRubyHighlight else paintRubyNormal
@@ -338,13 +360,17 @@ class LyricLineView @JvmOverloads constructor(
         } else {
             // Line-level rendering
             val p = if (isCurrentActiveLine) paintHighlight else paintNormal
+            val lineW = p.measureText(line.text)
             val lineStartX = when (line.alignment) {
                 LyricAlignment.LEFT -> paddingHorizontal
-                LyricAlignment.RIGHT -> width - paddingHorizontal - p.measureText(line.text)
-                LyricAlignment.CENTER -> (width - p.measureText(line.text)) / 2f
+                LyricAlignment.RIGHT -> width - paddingHorizontal - lineW
+                LyricAlignment.CENTER -> {
+                    if (lineW > usableWidth) paddingHorizontal else (width - lineW) / 2f
+                }
             }
             canvas.drawText(line.text, lineStartX, mainLineBaselineY, p)
         }
+        canvas.restore()
 
         // 4. Draw background vocals (x-bg)
         if (bgWordMetricsList.isNotEmpty()) {
@@ -372,10 +398,11 @@ class LyricLineView @JvmOverloads constructor(
             val bg = line.bgVocals.first()
             val p = if (isCurrentActiveLine) paintBgHighlight else paintBgNormal
             val bgText = "(${bg.text})"
+            val bgW = p.measureText(bgText)
             val bgStartX = when (line.alignment) {
                 LyricAlignment.LEFT -> paddingHorizontal
-                LyricAlignment.RIGHT -> width - paddingHorizontal - p.measureText(bgText)
-                LyricAlignment.CENTER -> (width - p.measureText(bgText)) / 2f
+                LyricAlignment.RIGHT -> width - paddingHorizontal - bgW
+                LyricAlignment.CENTER -> if (bgW > usableWidth) paddingHorizontal else (width - bgW) / 2f
             }
             canvas.drawText(bgText, bgStartX, bgBaselineY, p)
         }
@@ -383,10 +410,13 @@ class LyricLineView @JvmOverloads constructor(
         // 5. Draw Transliteration
         val roman = line.transliteration
         if (showTransliteration && !roman.isNullOrBlank()) {
+            val romanW = paintSub.measureText(roman)
+            val romanMaxScroll = (romanW - usableWidth).coerceAtLeast(0f)
+            val romanScroll = if (isCurrentActiveLine) romanMaxScroll * lineProgress else 0f
             val romanStartX = when (line.alignment) {
-                LyricAlignment.LEFT -> paddingHorizontal
-                LyricAlignment.RIGHT -> width - paddingHorizontal - paintSub.measureText(roman)
-                LyricAlignment.CENTER -> (width - paintSub.measureText(roman)) / 2f
+                LyricAlignment.LEFT -> paddingHorizontal - romanScroll
+                LyricAlignment.RIGHT -> width - paddingHorizontal - romanW
+                LyricAlignment.CENTER -> if (romanW > usableWidth) paddingHorizontal - romanScroll else (width - romanW) / 2f
             }
             canvas.drawText(roman, romanStartX, romanBaselineY, paintSub)
         }
@@ -394,10 +424,13 @@ class LyricLineView @JvmOverloads constructor(
         // 6. Draw Translation
         val trans = line.translation
         if (showTranslation && !trans.isNullOrBlank()) {
+            val transW = paintSub.measureText(trans)
+            val transMaxScroll = (transW - usableWidth).coerceAtLeast(0f)
+            val transScroll = if (isCurrentActiveLine) transMaxScroll * lineProgress else 0f
             val transStartX = when (line.alignment) {
-                LyricAlignment.LEFT -> paddingHorizontal
-                LyricAlignment.RIGHT -> width - paddingHorizontal - paintSub.measureText(trans)
-                LyricAlignment.CENTER -> (width - paintSub.measureText(trans)) / 2f
+                LyricAlignment.LEFT -> paddingHorizontal - transScroll
+                LyricAlignment.RIGHT -> width - paddingHorizontal - transW
+                LyricAlignment.CENTER -> if (transW > usableWidth) paddingHorizontal - transScroll else (width - transW) / 2f
             }
             canvas.drawText(trans, transStartX, transBaselineY, paintSub)
         }

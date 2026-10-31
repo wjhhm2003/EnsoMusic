@@ -75,10 +75,18 @@ class LyricManager private constructor(context: Context) {
                 withContext(Dispatchers.Main) {
                     onLyricLoaded(onlineTtml)
                 }
-            } else if (localResult == null) {
-                // If completely empty, deliver empty result
-                withContext(Dispatchers.Main) {
-                    onLyricLoaded(LyricData.EMPTY)
+            } else {
+                // Online search failed or timed out: Fall back to local embedded/LRC lyrics
+                val fallbackLocal = localResult ?: localExtractor.loadLocalLyric(song)
+                if (fallbackLocal != null && fallbackLocal.isNotEmpty()) {
+                    memoryCache.put(cacheKey, fallbackLocal)
+                    withContext(Dispatchers.Main) {
+                        onLyricLoaded(fallbackLocal)
+                    }
+                } else if (localResult == null) {
+                    withContext(Dispatchers.Main) {
+                        onLyricLoaded(LyricData.EMPTY)
+                    }
                 }
             }
         }

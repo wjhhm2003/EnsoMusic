@@ -179,4 +179,45 @@ class LyricParserTest {
         assertEquals("あした", ruby.rubyText)
         assertEquals(21000L, ruby.startTimeMs)
     }
+
+    @Test
+    fun testTtmlWordSpacingNormalization() {
+        // Case 1: Spans with whitespace outside tags
+        val ttml1 = """
+            <tt xmlns="http://www.w3.org/ns/ttml" itunes:timing="Word">
+              <body>
+                <div>
+                  <p begin="00:01.00" end="00:05.00">
+                    <span begin="00:01.00" end="00:02.00">Datura</span> <span begin="00:02.00" end="00:03.00">yellow</span> <span begin="00:03.00" end="00:04.00">gazing</span>
+                  </p>
+                </div>
+              </body>
+            </tt>
+        """.trimIndent()
+
+        val parsed1 = TtmlParser.parse(ttml1)
+        assertEquals(1, parsed1.lines.size)
+        assertEquals("Datura yellow gazing", parsed1.lines[0].text)
+
+        // Case 2: Spans without whitespace between tags (tightly coupled Latin words)
+        val ttml2 = """
+            <tt xmlns="http://www.w3.org/ns/ttml" itunes:timing="Word">
+              <body>
+                <div>
+                  <p begin="00:01.00" end="00:05.00">
+                    <span begin="00:01.00" end="00:02.00">I</span><span begin="00:02.00" end="00:02.50">see</span><span begin="00:02.50" end="00:03.00">the</span><span begin="00:03.00" end="00:03.50">birth</span>
+                  </p>
+                </div>
+              </body>
+            </tt>
+        """.trimIndent()
+
+        val parsed2 = TtmlParser.parse(ttml2)
+        assertEquals(1, parsed2.lines.size)
+        assertEquals("I see the birth", parsed2.lines[0].text)
+        assertEquals("I ", parsed2.lines[0].words!![0].text)
+        assertEquals("see ", parsed2.lines[0].words!![1].text)
+        assertEquals("the ", parsed2.lines[0].words!![2].text)
+        assertEquals("birth", parsed2.lines[0].words!![3].text)
+    }
 }

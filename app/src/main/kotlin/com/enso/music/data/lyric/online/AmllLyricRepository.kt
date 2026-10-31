@@ -131,24 +131,50 @@ class AmllLyricRepository(private val context: Context) {
     }
 
     private fun searchTtmlFromAmll(song: SongEntity): String? {
-        val cleanTitle = cleanSearchKeyword(song.title)
-        val cleanArtist = cleanSearchKeyword(song.artist.split('/', '&', ',', ';').firstOrNull() ?: song.artist)
-        val cleanAlbum = cleanSearchKeyword(song.album)
+        val rawTitle = song.title.trim()
+        val rawArtist = song.artist.split('/', '&', ',', ';').firstOrNull()?.trim() ?: song.artist.trim()
+        val rawAlbum = song.album.trim()
 
-        Log.i(TAG, "Searching AMLL for title='$cleanTitle', artist='$cleanArtist', album='$cleanAlbum'")
+        val cleanTitle = cleanSearchKeyword(rawTitle)
+        val cleanArtist = cleanSearchKeyword(rawArtist)
+        val cleanAlbum = cleanSearchKeyword(rawAlbum)
 
-        // Attempt 1: Search with title + artist
-        var result = executeAmllSearch(cleanTitle, cleanArtist, cleanAlbum, song.duration)
+        Log.i(TAG, "Searching AMLL for rawTitle='$rawTitle', cleanTitle='$cleanTitle', artist='$rawArtist'")
+
+        // Strategy 1: Exact Raw Title + Main Artist (e.g. preserves 'world.execute (me) ;')
+        var result = executeAmllSearch(rawTitle, rawArtist, rawAlbum, song.duration)
         if (result != null) return result
 
-        // Attempt 2: Fallback search with title only
-        if (cleanArtist.isNotBlank() && cleanArtist != "未知歌手") {
-            Log.i(TAG, "Artist search yielded no result, retrying with title only: '$cleanTitle'")
+        // Strategy 2: Exact Raw Title only (in case artist spelling differs, e.g. Mili vs ミリー)
+        if (rawArtist.isNotBlank() && rawArtist != "未知歌手") {
+            Log.d(TAG, "Strategy 2: Retrying with raw title only: '$rawTitle'")
+            result = executeAmllSearch(rawTitle, "", "", song.duration)
+            if (result != null) return result
+        }
+
+        // Strategy 3: Cleaned Title + Artist (strips (Live), [Remix], etc.)
+        if (cleanTitle != rawTitle && cleanTitle.isNotBlank()) {
+            Log.d(TAG, "Strategy 3: Retrying with cleaned title: '$cleanTitle' + '$cleanArtist'")
+            result = executeAmllSearch(cleanTitle, cleanArtist, cleanAlbum, song.duration)
+            if (result != null) return result
+
+            // Strategy 4: Cleaned Title only
+            Log.d(TAG, "Strategy 4: Retrying with cleaned title only: '$cleanTitle'")
             result = executeAmllSearch(cleanTitle, "", "", song.duration)
             if (result != null) return result
         }
 
-        // Attempt 3: LrcLib compatibility fallback
+        // Strategy 5: Trim trailing punctuation variant (e.g. 'world.execute')
+        val trimmedPunctTitle = rawTitle.trimEnd(';', ' ', '-', ':', '；', '—', '.')
+        if (trimmedPunctTitle != rawTitle && trimmedPunctTitle != cleanTitle && trimmedPunctTitle.isNotBlank()) {
+            Log.d(TAG, "Strategy 5: Retrying with trimmed punctuation title: '$trimmedPunctTitle'")
+            result = executeAmllSearch(trimmedPunctTitle, rawArtist, "", song.duration)
+            if (result != null) return result
+            result = executeAmllSearch(trimmedPunctTitle, "", "", song.duration)
+            if (result != null) return result
+        }
+
+        // Strategy 6: LrcLib compatibility fallback
         return tryLrcLibFallback(song, cleanTitle, cleanArtist, cleanAlbum)
     }
 
@@ -290,7 +316,10 @@ class AmllLyricRepository(private val context: Context) {
     }
 
     private fun cleanSearchKeyword(input: String): String {
-        return input.replace(Regex("""\s*[\(\[\{（【].*?[\)\]\}）】]"""), "").trim()
+        val stripped = input.replace(Regex("""\s*[\(\[\{（【].*?[\)\]\}）】]"""), "")
+            .trimEnd(';', ' ', '-', ':', '；', '—')
+            .trim()
+        return if (stripped.isNotBlank()) stripped else input.trim()
     }
 
     private fun encodeParam(param: String): String {
