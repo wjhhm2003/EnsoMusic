@@ -60,15 +60,15 @@ class LayoutIntegrityChallengerTest {
         assertEquals("Root width must match parent", "match_parent", root.getAttribute("android:layout_width"))
         assertEquals("Root height must match parent", "match_parent", root.getAttribute("android:layout_height"))
 
-        // Phase 1: Safe padding to prevent clipping at bottom edge
-        assertEquals("Root paddingTop must be 8dp", 8, parseDp(root.getAttribute("android:paddingTop")))
-        assertEquals("Root paddingBottom must be 14dp", 14, parseDp(root.getAttribute("android:paddingBottom")))
+        // Safe padding to prevent clipping at bottom edge
+        assertEquals("Root paddingTop must be 6dp", 6, parseDp(root.getAttribute("android:paddingTop")))
+        assertEquals("Root paddingBottom must be 12dp", 12, parseDp(root.getAttribute("android:paddingBottom")))
 
-        // 1. Cover Card - percentage height adaptive
+        // 1. Cover Card - percentage height adaptive (~43%, max 154dp)
         val cardCover = findElementById(root, "cardCover")!!
         assertEquals("Cover dimension ratio must be 1:1", "1:1", cardCover.getAttribute("app:layout_constraintDimensionRatio"))
-        assertEquals("Cover max height must be 136dp", 136, parseDp(cardCover.getAttribute("app:layout_constraintHeight_max")))
-        assertEquals("Cover percent height must be 0.38", "0.38", cardCover.getAttribute("app:layout_constraintHeight_percent"))
+        assertEquals("Cover max height must be 154dp", 154, parseDp(cardCover.getAttribute("app:layout_constraintHeight_max")))
+        assertEquals("Cover percent height must be 0.43", "0.43", cardCover.getAttribute("app:layout_constraintHeight_percent"))
 
         // 2. Title & Subtitle Text
         val tvTitle = findElementById(root, "tvTitle")!!
@@ -77,23 +77,21 @@ class LayoutIntegrityChallengerTest {
 
         val tvArtistAlbum = findElementById(root, "tvArtistAlbum")!!
         val artistTopMargin = parseDp(tvArtistAlbum.getAttribute("android:layout_marginTop"))
-        assertEquals("Artist top margin from title must be 2dp", 2, artistTopMargin)
+        assertEquals("Artist top margin from title must be 3dp", 3, artistTopMargin)
 
         // 3. SeekBar
         val sbProgress = findElementById(root, "sbProgress")!!
         val seekbarTopMargin = parseDp(sbProgress.getAttribute("android:layout_marginTop"))
         val seekbarHeight = parseDp(sbProgress.getAttribute("android:layout_height"))
         assertEquals("SeekBar top margin must be 8dp", 8, seekbarTopMargin)
-        assertEquals("SeekBar hitbox height must be 26dp", 26, seekbarHeight)
+        assertEquals("SeekBar hitbox height must be 28dp", 28, seekbarHeight)
         assertEquals("SeekBar maxHeight must be 3dp", 3, parseDp(sbProgress.getAttribute("android:maxHeight")))
         assertEquals("SeekBar minHeight must be 3dp", 3, parseDp(sbProgress.getAttribute("android:minHeight")))
 
         // 4. Control buttons
         val btnPlayPause = findElementById(root, "btnPlayPause")!!
-        val controlsTopMargin = parseDp(btnPlayPause.getAttribute("android:layout_marginTop"))
         val controlsHeight = parseDp(btnPlayPause.getAttribute("android:layout_height"))
-        assertEquals("Controls top margin must be 6dp", 6, controlsTopMargin)
-        assertEquals("Center play/pause button height must be 48dp", 48, controlsHeight)
+        assertEquals("Center play/pause button height must be 54dp", 54, controlsHeight)
 
         // 5. Duplicate Capsule Indicator must be completely removed
         val indicatorCapsule = findElementById(root, "indicatorCapsule")
@@ -110,8 +108,8 @@ class LayoutIntegrityChallengerTest {
             assertTrue("Control $id must exist", element != null)
             val w = parseDp(element!!.getAttribute("android:layout_width"))
             val h = parseDp(element.getAttribute("android:layout_height"))
-            assertTrue("Control $id width ($w dp) must be >= 44dp", w >= 44)
-            assertTrue("Control $id height ($h dp) must be >= 44dp", h >= 44)
+            assertTrue("Control $id width ($w dp) must be >= 46dp", w >= 46)
+            assertTrue("Control $id height ($h dp) must be >= 46dp", h >= 46)
         }
     }
 

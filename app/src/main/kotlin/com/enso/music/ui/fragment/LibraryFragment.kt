@@ -267,11 +267,40 @@ class LibraryFragment : Fragment() {
         binding.layoutDetail.visibility = View.VISIBLE
 
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-            val songs = AppDatabase.getInstance(requireContext()).songDao().getSongsByAlbumList(album.album)
+            val songDao = AppDatabase.getInstance(requireContext()).songDao()
+            val songs = songDao.getSongsByAlbumList(album.album)
+
+            // Auto-heal missing track numbers from metadata / filename if any
+            val metaHelper = com.enso.music.data.scanner.MetadataHelper(requireContext())
+            var hasUpdates = false
+            val resolvedSongs = songs.map { song ->
+                if (song.trackNumber <= 0) {
+                    val file = java.io.File(song.path)
+                    if (file.exists()) {
+                        val track = metaHelper.parseTrackNumberOnly(file)
+                        if (track > 0) {
+                            hasUpdates = true
+                            return@map song.copy(trackNumber = track)
+                        }
+                    }
+                }
+                song
+            }
+
+            if (hasUpdates) {
+                songDao.insertSongs(resolvedSongs)
+            }
+
+            // Strictly sort by album trackNumber ascending (1, 2, 3...), and fallback to filename/path
+            val sortedSongs = resolvedSongs.sortedWith(compareBy(
+                { if (it.trackNumber <= 0) 999999 else it.trackNumber },
+                { it.path }
+            ))
+
             withContext(Dispatchers.Main) {
                 currentDetailSongs.clear()
-                currentDetailSongs.addAll(songs)
-                detailSongAdapter.submitList(songs)
+                currentDetailSongs.addAll(sortedSongs)
+                detailSongAdapter.submitList(sortedSongs)
             }
         }
     }

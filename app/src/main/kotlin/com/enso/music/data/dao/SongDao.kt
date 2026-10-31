@@ -21,10 +21,24 @@ interface SongDao {
     @Query("SELECT * FROM songs ORDER BY sortKey COLLATE NOCASE ASC, title COLLATE NOCASE ASC")
     fun getAllSongsList(): List<SongEntity>
 
-    @Query("SELECT * FROM songs WHERE album = :album ORDER BY trackNumber ASC, sortKey COLLATE NOCASE ASC, title COLLATE NOCASE ASC")
+    @Query("""
+        SELECT * FROM songs 
+        WHERE album = :album 
+        ORDER BY 
+            CASE WHEN trackNumber <= 0 THEN 999999 ELSE trackNumber END ASC, 
+            path COLLATE NOCASE ASC, 
+            title COLLATE NOCASE ASC
+    """)
     fun getSongsByAlbum(album: String): Flow<List<SongEntity>>
 
-    @Query("SELECT * FROM songs WHERE album = :album ORDER BY trackNumber ASC, sortKey COLLATE NOCASE ASC, title COLLATE NOCASE ASC")
+    @Query("""
+        SELECT * FROM songs 
+        WHERE album = :album 
+        ORDER BY 
+            CASE WHEN trackNumber <= 0 THEN 999999 ELSE trackNumber END ASC, 
+            path COLLATE NOCASE ASC, 
+            title COLLATE NOCASE ASC
+    """)
     fun getSongsByAlbumList(album: String): List<SongEntity>
 
     @Query("""
