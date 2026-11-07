@@ -1,366 +1,111 @@
-# EnsoMusic 系统架构设计与技术实现文档 (ARCHITECTURE.md)
+# EnsoMusic 架构与实现
 
-EnsoMusic 是一款专为超低功耗智能手表设备（基于 Android 8.1 / API 27 深度定制平台，典型屏幕规格为 502×410 物理像素矩形屏）打造的高性能、轻量级、离线优先的本地音乐播放器。
+本文描述 EnsoMusic 的系统架构与核心实现。EnsoMusic 是面向 Android 8.1（API 27）智能手表的离线优先本地音乐播放器，基于 Kotlin、Android View/XML、协程和 Room 构建。应用通过直接遍历用户授权的目录管理曲库，不依赖系统 `MediaStore` 音乐索引；联网功能仅用于获取在线歌词。
 
-本文档全面阐述 EnsoMusic 的核心架构设计思想、分层体系结构、关键子系统实现原理、功耗与内存调优策略以及扩展规范。
-
----
-
-## 1. 设计愿景与关键工程指标
-
-在可穿戴设备（Smartwatch）受限的硬件环境下运行音乐播放器，面临三大核心工程挑战：**严苛的电池容量限制（通常仅 300mAh~500mAh）**、**小尺寸高 PPI 屏幕的可视空间极限** 以及 **穿戴定制系统的后台休眠与内存回收机制**。
-
-为应对上述挑战，EnsoMusic 在设计之初确立了以下技术原则：
-
-1. **绝对轻量化与零过度封装**：
-   - 全工程采用纯原生 Android View 与 XML 布局，**严禁引入体积沉重且运行时占用大量内存的 Jetpack Compose 运行时**。
-   - 依赖极简化，仅使用 `androidx.core`, `appcompat`, `constraintlayout`, `recyclerview`, `viewpager2` 以及编译期代码生成的 `room`。
-   - 最终 Release 安装包控制在 **1.48 MB** 左右，冷启动时间小于 150ms。
-2. **离线优先与数据自治（Data Autonomy）**：
-   - **完全绕过系统 `MediaStore.Audio` 索引服务**。穿戴系统的 MediaStore 普遍存在扫描延迟、文件修改感知不及时、合辑信息混乱以及乱码问题。
-   - 建立应用级自主文件系统遍历器与轻量 SQLite (Room) 本地数据库，支持任意本地目录的白名单管理与增量检索。
-3. **极致功耗控制与物理零分配（Zero-GC in Render Loop）**：
-   - 歌词动态逐字渲染引擎与自定义 View 在其 `onDraw()` 绘制热点路径中做到 **物理零内存分配**（Zero Object Allocation），杜绝瞬时垃圾回收（GC Pauses）导致的音频卡顿与动画掉帧。
-   - 屏幕熄灭后，仅保持音频解码最小必要的 CPU 时钟，释放所有非必要唤醒锁（WakeLock），无任何后台无效轮询。
-4. **全特性音频与多格式歌词引擎**：
-   - 支持主流音频封装格式（MP3, FLAC, OGG, M4A, AAC, WAV）。
-   - 构建具备双语翻译、背景音轨识别、逐字/逐音节（Syllable-level）平滑染色的现代化歌词引擎，全面兼容 Apple Music 规范的 **TTML 歌词**、**逐字增强型 LRC**、**标准逐行 LRC** 及音频内嵌元数据歌词（ID3v2, Vorbis Comment, MP4 Metadata）。
-   - 集成 AMLL (Apple Music-like Lyrics) 在线 TTML 词库检索与多级退避自动降级算法，并实现本地持久化缓存。
-
----
-
-## 2. 系统全景架构图 (Overall Architecture)
-
-EnsoMusic 采用清晰的分层解耦架构，自上而下分为 **表现层 (UI Presentation Layer)**、**核心服务与回放引擎层 (Service & Core Playback Layer)**、**歌词处理中枢 (Lyric Engine & Repository)** 以及 **数据与持久化层 (Data & Persistence Layer)**。
-
-架构图严格遵循自顶向下的单向依赖设计，消除了跨层穿透与子图悬空箭头，清晰展示各组件之间的调用与协作关系：
+## 系统结构
 
 ```mermaid
 flowchart TD
-    %% 全景分层定义
-    subgraph LayerUI ["1. 表现层 (UI Presentation Layer)"]
-        MainActivity["MainActivity<br/>(3-Stage Back Router 手表侧滑路由)"]
-        VP2["ViewPager2 主容器"]
-        
-        LibFrag["LibraryFragment<br/>(歌曲 / 专辑 / 歌手)"]
-        NowFrag["NowPlayingFragment<br/>(502×410 物理适配 / 细粒度控制)"]
-        QueueFrag["QueueFolderFragment<br/>(实时队列 / 白名单目录)"]
-        
-        AlphaView["AlphabetIndexView<br/>(27键拼音首字母快搜)"]
-        LyricComp["LyricView & LyricLineView<br/>(零GC逐字发光 & 跑马灯滚动)"]
-    end
-
-    subgraph LayerService ["2. 核心服务与回放引擎层 (Service & Core Playback Layer)"]
-        Service["MusicPlaybackService<br/>(前台常驻保活服务)"]
-        PlayerEngine["MediaPlayer 状态机<br/>(MP3 / FLAC / OGG / M4A / WAV 解码)"]
-        AntiLeak["三层防漏音安全防线<br/>(NoisyReceiver + AudioFocus 拦截)"]
-        FineVol["FineVolumeController<br/>(100阶无极软硬件平滑音量)"]
-    end
-
-    subgraph LayerLyric ["3. 歌词处理中枢 (Lyric Engine & Repository)"]
-        LyricMgr["LyricManager<br/>(调度总线 & 内存状态缓存)"]
-        LocalExtract["LocalLyricExtractor<br/>(ID3v2 / Vorbis / MP4 / 同名文件提取)"]
-        AmllRepo["AmllLyricRepository<br/>(AMLL 在线词库 6 级渐进检索)"]
-        Parsers["语法解析矩阵<br/>(TtmlParser / LrcParser)"]
-        DiskCache[("TTML 磁盘持久化缓存<br/>/files/ttml_cache/")]
-    end
-
-    subgraph LayerData ["4. 数据与持久化层 (Data & Persistence Layer)"]
-        Scanner["FolderScanner<br/>(多线程增量文件系统扫描器)"]
-        ScanUtils["元数据提取套件<br/>(MetadataHelper / ArtistParser / PinyinHelper)"]
-        Daos["DAO 访问接口<br/>(SongDao / ScanFolderDao)"]
-        RoomDB[("AppDatabase<br/>(Room SQLite 数据库)")]
-    end
-
-    %% 表现层内部层级
-    MainActivity --> VP2
-    VP2 --> LibFrag
-    VP2 --> NowFrag
-    VP2 --> QueueFrag
-    LibFrag -.-> AlphaView
-    NowFrag -.-> LyricComp
-
-    %% 表现层 -> 核心服务层
-    NowFrag -->|Binder / ServiceConnection| Service
-    LibFrag -->|播放指令| Service
-    QueueFrag -->|切歌/移除/排序| Service
-    Service --> PlayerEngine
-    Service --> AntiLeak
-    Service --> FineVol
-
-    %% 表现层 & 服务层 -> 歌词处理中枢
-    NowFrag -->|订阅歌词状态流| LyricMgr
-    Service -->|切歌驱动预载| LyricMgr
-    LyricMgr --> LocalExtract
-    LyricMgr --> AmllRepo
-    LocalExtract --> Parsers
-    AmllRepo --> Parsers
-    AmllRepo -.->|持久化落盘| DiskCache
-
-    %% 业务层 -> 数据与持久化层
-    LibFrag & QueueFrag -->|查询曲库/文件夹| Daos
-    Scanner --> ScanUtils
-    Scanner --> Daos
-    Daos --> RoomDB
+    A[MainActivity / ViewPager2] --> L[LibraryFragment]
+    A --> N[NowPlayingFragment]
+    A --> Q[QueueFolderFragment]
+    L --> DB[(Room 数据库)]
+    L --> S[MusicPlaybackService]
+    N --> S
+    Q --> S
+    Q --> SC[FolderScanner 单例]
+    SC --> DB
+    SC --> M[MetadataHelper]
+    M --> C[CoverManager]
+    S --> PQ[PlayQueue]
+    S --> MP[MediaPlayer]
+    S --> MS[MediaSession / 通知]
+    N --> LM[LyricManager]
+    LM --> LE[本地歌词提取 / 解析]
+    LM --> AM[AMLL 在线查询 / TTML 缓存]
+    N --> LV[LyricView / LyricLineView]
 ```
 
----
+**组件协作关系：**
+- **UI 层（Fragment）** 直接观察 Room 数据库，并与播放服务和歌词管理器交互。
+- **服务层（`MusicPlaybackService`）** 集中管理播放状态与音频生命周期。
+- **数据与后台层** 由 Room 持久化曲库，`FolderScanner` 和 `LyricManager` 分别在独立的协程作用域中处理文件扫描与歌词加载。
 
-## 3. 核心分层设计与模块实现解析
+## 播放与队列
 
-### 3.1 表现层 (UI Presentation Layer)
+### 服务及状态
 
-表现层全面针对 502×410 方形小屏进行了像素级深度适配，核心解决以下交互与视觉痛点：
+`MusicPlaybackService` 是绑定式前台服务，作为播放状态的唯一真实来源（Single Source of Truth）。`MainActivity` 负责维护服务连接，UI 层通过服务暴露的 `StateFlow` 订阅 `PlaybackInfo`、播放队列、细粒度音量和睡眠定时器状态。`PlaybackInfo` 明确区分“准备中”、“播放中”与“错误”状态，确保异步加载期间的 UI 状态准确。服务同时统一管理 `MediaSession`、媒体通知、音频焦点及输出设备切换。
 
-#### 1. 结构化页面导航与侧滑返回路由器 (Hierarchical Back Router)
-由于智能手表通常使用右滑手势作为全局物理/系统返回按键（注入 `KeyEvent.KEYCODE_BACK`），原生 Wear OS 或穿戴 ROM 容易在任意页面右滑时直接退出至桌面。
-EnsoMusic 在 `MainActivity` 中建立了三级严格拦截分发机制：
-- **Level 3 (浮层拦截)**：优先判断并关闭最顶层打开的临时弹窗与浮层，包括：
-  - 音量无极调节悬浮面板（`VolumePanel`）；
-  - 全屏沉浸式歌词浮层（`LyricOverlay`）；
-  - 专辑/歌手二级详情列表页（`layoutDetail`）；
-  - 快速字母索引选择弹窗。
-- **Level 2 (二级页面退回主页)**：若用户位于第 0 页（曲库）或第 2 页（队列与文件夹设置），则拦截退出动作，将 `ViewPager2` 平滑滑动切回第 1 页（正在播放主屏）。
-- **Level 1 (桌面安全退出)**：仅当用户已身处第 1 页核心播放界面且没有任何浮层打开时，才允许响应返回手势。此时调用 `moveTaskToBack(true)` 将应用退至后台并返回手表表盘，确保**后台音乐播放绝不中断**。
+播放器通过 `prepareAsync()` 异步准备音频，并引入“准备代次（Generation）”机制，防止已取消的旧请求回调污染当前播放状态。播放失败时，服务向外发布错误状态并按队列规则自动跳转。正常播放时，服务在满足条件时预先初始化下一个 `MediaPlayer` 并通过 `setNextMediaPlayer` 实现无缝衔接（取决于具体音频编码格式）；当循环模式、队列或睡眠定时器状态改变时，自动释放已失效的预备播放器。
 
-#### 2. 502×410 物理屏幕纵向安全自适应
-针对小屏幕极易出现的底部控制按钮被屏幕物理底边裁切的问题：
-- **百分比与最大高度约束**：放弃固定高度尺寸，专辑封面控件采用 `layout_constraintDimensionRatio="1:1"` 搭配 `layout_constraintHeight_percent="0.38"` 与 `layout_constraintHeight_max="154dp"`，使其在各种不同比例的穿戴屏幕上动态收缩。
-- **呼吸内边距**：根布局设置严格的 `paddingTop="8dp"` 与 `paddingBottom="14dp"`，底部播放控制按钮锚定在 `layout_constraintBottom_toBottomOf="parent"`，在保留 14dp 物理防误触边距的前提下，保证整屏 100% 完整展示。
-- **细线精工 SeekBar**：针对 Android 8.1 平台 SeekBar 默认轨道被拉伸为粗长方体的问题，通过在 XML 中配置 `maxHeight="3dp"`, `minHeight="3dp"`, `splitTrack="false"` 并定义专用的 `<layer-list>` Drawable，将轨道锁定为 3dp 极致细线，同时设置左右内边距防止圆滑块（Thumb）在两极越界被截断。
+服务监听音频焦点、`ACTION_AUDIO_BECOMING_NOISY` 广播及蓝牙连接事件，在输出设备断开或焦点丢失时自动暂停或调节音量。此外，服务内置音频淡入淡出、睡眠定时停止以及 0–100 级的对数感知音量控制。
 
-#### 3. 27 键汉字拼音首字母快速索引 (`AlphabetIndexView`)
-在小屏幕上翻动上千首歌曲效率极低。EnsoMusic 自研了集成纯原生轻量哈希算法的 `PinyinInitialHelper` 与自定义 `AlphabetIndexView`：
-- 支持 `A-Z` 及 `#`（非英文字符）；
-- 用户按住右侧索引条上下滑动时，左侧弹出放大气泡提示当前定位字母，并驱动 `RecyclerView` 瞬间跳转至对应位置。
+### 队列规则
 
----
+`PlayQueue<T>` 是平台无关的纯 Kotlin 队列模型，负责维护歌曲列表、当前索引和随机序列。支持队列重置、定点跳转、前后切歌、下一首插入及条目移除，每次变更后由服务生成不可变快照发布给 UI。
 
-### 3.2 领域服务与音频回放引擎 (Service & Core Engine)
+- **播放模式**：支持列表循环、单曲循环、随机播放和顺序播放（UI 按钮循环切换前三种模式）。
+- **边界行为**：曲目自然结束时，单曲循环重播当前曲目，顺序播放至队尾后停止；用户手动点击“下一首”时，在队尾自动回绕至队首。
+- **随机算法**：单轮随机播放使用固定洗牌序列，保证前后切歌路径一致；一轮结束后重新洗牌，并规避新序列首尾与上一首重复。
+- **动态维护**：增删队列条目时动态修正随机序列与当前索引。核心逻辑由 `PlayQueueTest` 进行 JVM 单元测试覆盖。
 
-音乐播放器的心脏是常驻后台的高保真音频服务 `MusicPlaybackService`。
+### 状态持久化与恢复
 
-#### 1. 前台保活与状态机设计
-- 采用 Android 8.0+ 要求的 `startForeground()` 机制。在 Service 启动入口毫秒级绑定前台常驻 Notification，防止穿戴系统因后台限制抛出 `ForegroundServiceDidNotStartInTimeException` 并发生 ANR。
-- 采用严谨的 `MediaPlayer` 状态机模型，严格封装 `IDLE`, `INITIALIZED`, `PREPARING`, `PREPARED`, `STARTED`, `PAUSED`, `STOPPED`, `PLAYBACK_COMPLETED`, `ERROR` 等状态流转，避免在非法状态下触发原生崩溃。
+队列中的文件路径持久化至应用私有目录的 `playback_queue.txt`；当前曲目、播放进度、索引及配置项保存于 `SharedPreferences`。
 
-#### 2. 三层物理防漏音机制 (Three-tier Anti-leakage Protection)
-针对在公车、会议室或公共场合突然断开蓝牙耳机导致的刺耳外放尴尬，构建了三层递进拦截策略：
-1. **音频广播拦截 (`AudioManager.ACTION_AUDIO_BECOMING_NOISY`)**：在耳机或蓝牙断开瞬间，系统广播发出毫秒内，立即调用 `pause()` 暂停解码，切断输出通道。
-2. **音频焦点丢失响应 (`OnAudioFocusChangeListener`)**：
-   - `AUDIOFOCUS_LOSS`：其他应用请求永久焦点，立即保存播放进度并停止播放；
-   - `AUDIOFOCUS_LOSS_TRANSIENT`：通知音或语音播报时瞬时暂停；
-   - `AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK`：根据系统策略瞬时衰减音量（Duck 音量至 20%），播报完毕后平滑恢复。
-3. **硬件插拔与蓝牙断连主动轮询防线**：在切歌与恢复播放时，二次校验硬件音频路由，确保只有在预期通道就绪时才执行 `start()`。
+服务启动时异步读取路径列表并结合数据库恢复队列对象；若恢复完成前用户已主动发起新的播放请求，则优先保留用户操作，放弃旧状态回写。恢复期间收到的媒体控制指令会暂存并延后执行。运行期间服务定期记录播放进度，并在冷启动恢复且播放器准备就绪后自动执行 `seekTo` 定位。
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as 用户
-    participant BT as 蓝牙耳机 / 硬件插孔
-    participant OS as Android 系统广播 / AudioManager
-    participant Service as MusicPlaybackService
-    participant Player as MediaPlayer 核心引擎
-    participant UI as NowPlayingFragment
+服务根据播放状态动态升降级前台通知，UI 销毁不会中断后台播放。
 
-    User->>BT: 突然断开蓝牙连接 / 拔出耳机
-    BT-->>OS: 硬件断连事件
-    OS->>Service: 广播 ACTION_AUDIO_BECOMING_NOISY
-    activate Service
-    Service->>Player: 毫秒级调用 pause() 立即切断输出通道
-    Service->>OS: 放弃临时音频焦点 (abandonAudioFocus)
-    Service-->>UI: 发送 PlaybackState(PAUSED)
-    deactivate Service
-    UI->>UI: 更新播放按钮为暂停态，挂起逐字动画与跑马滚动
-```
+## 曲库与扫描
 
-#### 3. 100 阶细粒度软件与硬件协同音量控制器 (`FineVolumeController`)
-原生 Android 系统的媒体音量级别通常只有 15 级，在手表低阻抗动圈耳机或睡眠场景下，上一格太响、下一格听不清：
-- 构建了 `FineVolumeController`，将单一档位扩展为 100 阶无极音量标尺；
-- 低区与高区均支持对数衰减算法，将软增益衰减与系统物理硬件音量有机结合，提供丝滑的音量过渡。
+`FolderScanner` 是进程内单例，运行于 `SupervisorJob + Dispatchers.IO` 作用域，通过共享的 `ScanProgress StateFlow` 广播扫描进度。扫描任务独立于 UI 生命周期，并由 `ScanRequestGate` 串行化并发请求与合并后续扫描指令。
 
----
+1. **目录读取**：从 Room 读取用户配置的扫描目录；首次启动默认初始化系统常见音乐与下载目录。
+2. **文件遍历**：递归识别 MP3、FLAC、WAV、M4A、AAC、OGG 格式；通过规范化路径（Canonical Path）对嵌套或重叠目录去重。
+3. **增量与全量判定**：增量扫描比对文件路径、最后修改时间（mtime）和文件大小，仅解析新增或变动文件；全量扫描强制重新解析所选目录下的全部音频。
+4. **元数据入库**：`MetadataHelper` 提取标签、音轨信息与内嵌封面，`ArtistParser` 处理多歌手拆分。歌曲与歌手关系分批写入 Room，扫描进度按时间窗口节流发布。
+5. **失效清理**：仅清理本次选中目录范围内已在文件系统中移除的记录。清理逻辑使用规范路径与严格的路径边界匹配，防止误删同名前缀目录或未勾选目录的数据。
 
-### 3.3 歌词子系统 (Lyric Subsystem)
+## 封面管理
 
-歌词引擎是 EnsoMusic 最具特色的模块之一，深度参考了 **[amll-dev/applemusic-like-lyrics](https://github.com/amll-dev/applemusic-like-lyrics)** 的规范，实现了兼具低功耗、高保真与逐字渐变特性的全套歌词架构。
+`CoverManager` 优先提取音频内嵌封面，若无则回退查找同目录下的常见封面图片。在扫描流程中，支持直接复用 `MediaMetadataRetriever` 已打开的文件句柄提取字节流，减少重复 I/O。
 
-#### 1. 多格式歌词解析矩阵 (Lyric Parser Matrix)
-```mermaid
-classDiagram
-    class ParsedLyric {
-        +LyricFormat format
-        +List~LyricLine~ lines
-        +String title
-        +String artist
-        +String album
-    }
-    class LyricLine {
-        +Long startTimeMs
-        +Long endTimeMs
-        +String text
-        +String translation
-        +List~LyricSyllable~ syllables
-        +List~LyricSyllable~ bgSyllables
-    }
-    class LyricSyllable {
-        +Long startTimeMs
-        +Long endTimeMs
-        +String text
-    }
-    class LyricFormat {
-        <<enumeration>>
-        TTML
-        ENHANCED_LRC
-        LRC
-        PLAIN
-    }
-    ParsedLyric o-- LyricLine
-    LyricLine o-- LyricSyllable
-    ParsedLyric --> LyricFormat
-```
+封面图片采用采样解码与 `RGB_565` 格式（目标尺寸 240×240）以控制内存峰值，处理后以 JPEG 格式缓存至 `cache/covers`。内嵌封面按内容哈希去重，外部封面按“路径 + 修改时间”生成缓存键；文件落盘采用“写入临时文件再原子重命名/复制”的策略。内存层维护 4 MiB 的 `Bitmap` LRU 缓存及以封面路径为键的主色调缓存。列表异步加载时通过绑定请求标识，防止 RecyclerView 视图复用导致封面错位。
 
-- **TTML 解析器 (`TtmlParser`)**：
-  - 基于 Android 内置 `XmlPullParser` 实现流式事件解析，无需在内存中构建庞大的 DOM 树；
-  - 严格支持 Apple Music 扩展命名空间（`ttm:role="lyricBackground"`，`span` 嵌套音节结构）；
-  - **逐音节时间戳（Syllable-level timing）防虚假空格与西文字母粘连修复**：严格保留 XML 文本节点（`XmlPullParser.TEXT`）中的原始空白字符，在拼接内部音节时不盲目插入空格，使得 `OBJECT CREATION`、`parameters` 等单词既不会连为一体，也不会在音节之间产生错误的裂隙（如 `para meters`）。
-- **增强型与标准 LRC 解析器 (`LrcParser`)**：
-  - 支持标准逐行时间标签 `[mm:ss.xx]`；
-  - 兼容单行多时间戳语法（多用于副歌重复行合并）；
-  - 兼容 `<mm:ss.xx>` 形式的增强逐字时间标签，自动解构为 `LyricSyllable` 音节序列。
-- **内嵌音频标签歌词提取器 (`LocalLyricExtractor`)**：
-  - 规避读取整首十几兆甚至几十兆高解析度音频带来的内存压力，仅按固定数据块流式扫描文件头部 Metadata 区域；
-  - 全面支持 MP3 ID3v2 标签中的 `USLT`（非同步歌词）与 `SYLT`（同步时间戳歌词）数据帧；
-  - 支持 FLAC/OGG 中的 Vorbis Comment `LYRICS` / `UNSYNCEDLYRICS` 字段；
-  - 支持 MP4 / M4A (AAC) 中的 `©lyr` 元数据 Atom；
-  - **字符集编码自适应嗅探 (`EncodingUtils`)**：自动判定 UTF-8、带/不带 BOM 的 UTF-16LE/BE，并支持 GBK/GB18030 以及 Shift-JIS 日文编码智能回退，彻底消除乱码。
+## 歌词系统
 
-#### 2. AMLL 在线 TTML 词库与 6 级渐进式回退检索机制
-当本地无 `.ttml` 文件时，`AmllLyricRepository` 会在网络可用时向 AMLL API (`https://api.amll.dev`) 发起检索。
-为应对网络词库元数据多样性以及特殊符号（如 Mili 的《world.execute (me) ;》）问题，设计了 **6 级渐进检索算法**：
+`NowPlayingFragment` 随曲目切换向 `LyricManager` 发起请求，并在切歌或视图销毁时自动取消挂起任务。歌词解析与网络请求在 IO 线程执行，结果切回主线程分发；管理器在内存中维护最近 8 首歌曲的解析结果 LRU 缓存。
 
-```mermaid
-flowchart TD
-    Start["开始检索曲目歌词"] --> T1["Tier 1: 原始歌名 + 原始歌手 (完整括号与标点)"]
-    T1 -- 命中 TTML --> Cache["落盘持久化至 /ttml_cache/ 并内存秒开"]
-    T1 -- 未命中 --> T2["Tier 2: 原始歌名 + 忽略歌手 (容错合唱或拆分不一致)"]
-    T2 -- 命中 TTML --> Cache
-    T2 -- 未命中 --> T3["Tier 3: 剥离后缀版本号后的纯净歌名 + 首位歌手"]
-    T3 -- 命中 TTML --> Cache
-    T3 -- 未命中 --> T4["Tier 4: 剥离后缀版本号后的纯净歌名 (忽略歌手)"]
-    T4 -- 命中 TTML --> Cache
-    T4 -- 未命中 --> T5["Tier 5: 裁剪末尾特殊符号容错检索"]
-    T5 -- 命中 TTML --> Cache
-    T5 -- 未命中 --> T6["Tier 6: 回退至 LrcLib 兼容接口 (/api/get) 检索 LRC"]
-    T6 -- 命中 --> RenderLRC["渲染 LRC 歌词"]
-    T6 -- 全部未命中/超时 --> LocalFallback["无缝平滑回退至本地内嵌歌词 (Zero Interruption)"]
-```
+1. **本地优先**：依次检索内存缓存、同目录同名歌词文件及音频内嵌歌词（支持 TTML、LRC）。若命中本地 TTML 则直接完成加载。
+2. **防抖与在线升级**：若本地未命中 TTML，常规请求在等待 700 ms 防抖延迟后发起在线检索（快速切歌时直接取消延迟与未决请求）。用户手动强制刷新时跳过缓存与防抖，失败则回退保留本地歌词。
+3. **在线检索（`AmllLyricRepository`）**：按“本地持久化缓存（`files/ttml_cache`）→ 否定缓存 → 在线 API”的顺序查询。在线检索支持多策略匹配与 URL 去重，单次请求超时 5 秒，整体任务超时预算 12 秒。
+4. **缓存策略**：明确无匹配结果时写入有效期 7 天的否定缓存；网络异常或超时等临时错误不记录否定缓存。命中后持久化 TTML 原文并解析；协程取消时同步断开底层 HTTP 连接。
 
-#### 3. 渲染引擎物理零分配与逐字动画实现 (`LyricLineView`)
-为了在低端手表 GPU/CPU 上实现丝滑的逐字发光变色效果，`LyricLineView` 做到了以下优化：
-- **静态资源预分配**：所有 `TextPaint`、`Rect`、`Path`、`Matrix` 对象均在初始化阶段分配完毕，严禁在 `onDraw()` 中使用 `new` 关键字或触发任何形式的自动装箱/拆箱。
-- **1:1 像素级重叠双层文字染色**：
-  底层采用中性灰色（如 `#88FFFFFF`）绘制未唱文字，上层采用主题高亮翠绿（`#4CAF50`）或高亮纯白（`#FFFFFF`）绘制已唱文字。上层文字的绘制区域通过 `Canvas.clipRect()` 限制。
-  通过严格锁定两层画笔的 `textSize`、`typeface` 和 `letterSpacing`，杜绝了字号突变导致的“文字抽动膨胀”瑕疵。
-- **超长单行自适应跑马灯滚动**：
-  若歌词单行测量宽度超出当前手表视口宽度，计算最大可滚动距离 `maxScroll = totalWidth - usableWidth`。
-  根据该行当前的演唱完成百分比 `lineProgress` 动态计算瞬时偏移量：
-  $$\text{scrollOffset} = \text{maxScroll} \times \text{lineProgress}$$
-  并在绘制前执行 `canvas.translate(-scrollOffset, 0f)`，实现完全无卡顿的平滑横向滚动，且伴奏和双语翻译行严格同步平移。
+`TtmlParser` 与 `LrcParser` 将不同格式统一转换为内部歌词模型。`LyricView` 与 `LyricLineView` 根据实时播放进度渲染逐行、逐字音节、翻译及时间轴重叠的歌词行，并在绘制路径中避免冗余对象分配与后台无效重绘。
 
----
+## 界面与线程模型
 
-### 3.4 数据持久化与智能扫描系统 (Data & Storage)
+- **页面结构**：`MainActivity` 承载 `ViewPager2`、维护服务绑定与返回栈；`LibraryFragment` 提供歌曲、专辑、歌手分类浏览及字母快查索引；`NowPlayingFragment` 负责播放控制、封面、歌词及音量调节；`QueueFolderFragment` 管理当前队列与扫描目录配置。布局采用原生 View/XML 针对手表小屏优化。
+- **线程调度**：数据库查询、文件扫描、元数据提取、封面解码与网络请求均在后台线程池执行；`MusicPlaybackService` 使用主线程协程统一协调 `MediaPlayer` 调用与状态分发。
+- **生命周期绑定**：UI 在视图生命周期（`viewLifecycleOwner`）内收集状态流，并在视图不可见或销毁时停止进度轮询、歌词刷新与异步加载任务。UI 仅对 `PlaybackInfo` 状态快照进行响应式渲染，不在本地维护冗余播放状态。
 
-#### 1. 规避系统脏数据的自治扫描器 (`FolderScanner`)
-- 穿戴系统存储资源珍贵，用户通常将音乐按文件夹归类存放在 `/sdcard/Music`、`/sdcard/Download` 或特定自建目录中。
-- `ScanFolderEntity` 支持配置自定义白名单扫描目录，每个目录可单独启用或禁用。
-- 扫描器在协程 IO 调度器中运行，基于文件 `lastModified` 与文件长度进行指纹比对，实现毫秒级增量更新。
+## 代码结构
 
-#### 2. 音轨排序算法与自动自愈机制 (`MetadataHelper`)
-专辑内曲目顺序对听歌体验至关重要。
-- 优先从音频 ID3 标签中提取 `trackNumber`。针对形如 `"3"`, `"03"`, `"3/12"`, `"03/12"` 的各种格式，通过正则 `^(\d+)` 提取出物理音轨整数。
-- 若标签中未记录音轨号（`trackNumber <= 0`），则自动激活**文件名序号自动嗅探自愈机制**（例如 `"01 - Intro.mp3"` $\to$ 提取为 `1`），彻底修复专辑曲目播放顺序错乱的问题。
+| 路径 | 核心职责 |
+| --- | --- |
+| `service/MusicPlaybackService.kt` | 播放器控制、音频焦点、媒体通知、MediaSession、状态持久化与流式分发 |
+| `service/PlayQueue.kt`, `PlaybackInfo.kt` | 队列算法、播放模式切换与不可变状态模型 |
+| `data/scanner/` | 目录遍历、扫描并发控制、路径边界匹配与元数据提取 |
+| `data/dao/`, `data/db/`, `data/entity/` | Room 数据库定义、实体模型与批量操作 DAO |
+| `data/cover/` | 封面提取、采样压缩、哈希去重与多级缓存 |
+| `data/lyric/` | 本地歌词读取、AMLL 在线检索、缓存管理与 TTML/LRC 解析 |
+| `ui/fragment/`, `ui/adapter/`, `ui/lyric/` | 界面视图控制器、列表适配器与自定义歌词渲染控件 |
+| `app/src/test/` | JVM 单元测试套件 |
+| `tools/benchmark-runtime.ps1`, `tools/compare-runtime.ps1` | 真机运行时性能采集与基准对比脚本 |
 
-#### 3. 智能多歌手切分解析器 (`ArtistParser`)
-为了在歌手列表和检索中将合唱歌曲归入各个独立歌手的主页，`ArtistParser` 实现了精细的语法分词器：
-- 识别常见中文与英文标点分隔符：`/`, `&`, `、`, `,`，以及全角符号；
-- **协作词前后边界保护**：识别 ` feat. `, ` ft. `, ` with ` 等协作关键词，同时要求其前后必须包含空格或特定标点，防止将 `Taylor Swift` 误切分为 `Taylor Swi` 与 `t`，或破坏 `Soft`、`After` 等单词。
+## 测试与性能基准
 
----
-
-## 4. 性能优化与功耗控制体系 (Performance & Power Profiling)
-
-| 优化维度 | 传统播放器常见缺陷 | EnsoMusic 架构级应对方案 |
-| :--- | :--- | :--- |
-| **内存占用 (RAM)** | 引入 Compose 框架，空载内存 > 85MB | 纯 Native View，Release 包全量混淆压缩，常驻内存仅 **18MB~24MB** |
-| **垃圾回收 (GC)** | `onDraw` 内部频繁生成对象，歌词滑动时 GC 毛刺 | 绘制热点路径**物理零分配**，预缓存文字测量尺寸，零掉帧 |
-| **CPU 占用 (Screen Off)** | 熄屏后后台存在无意义轮询或唤醒定时器 | 熄屏后彻底挂起 UI 绘制，仅留 `MediaPlayer` 底层硬解/软解，系统进入睡眠 |
-| **存储 I/O** | 每次加载歌词均重复发起网络请求或磁盘全量解析 | 三级缓存架构：内存对象缓存 $\to$ 本地 TTML 磁盘缓存 $\to$ 增量网络请求 |
-| **网络流量** | 无限制轮询词库或下载高码率无损素材 | 小屏省流分页（`pageSize=5`），仅拉取轻量 JSON 与 TTML 文本，命中即落盘 |
-
----
-
-## 5. 项目工程结构全景 (Project Directory Layout)
-
-```
-EnsoMusic/
-├── app/
-│   ├── build.gradle.kts                   // 构建脚本 (MinSdk 27, TargetSdk 27, 纯 Kotlin & KSP)
-│   ├── proguard-rules.pro                 // 混淆规则 (保护 Room、XmlPull、模型类与反射边界)
-│   └── src/
-│       ├── main/
-│       │   ├── AndroidManifest.xml        // 权限声明 (前台服务、WAKE_LOCK、网络、存储)
-│       │   ├── kotlin/com/enso/music/
-│       │   │   ├── EnsoApp.kt             // 应用程序入口 (单例初始化)
-│       │   │   ├── data/                  // 数据层
-│       │   │   │   ├── cover/             // 封面缓存管理器 (CoverManager)
-│       │   │   │   ├── dao/               // Room DAO (SongDao, ScanFolderDao)
-│       │   │   │   ├── db/                // Room 数据库配置 (AppDatabase)
-│       │   │   │   ├── entity/            // 数据实体 (Song, ScanFolder, CrossRef)
-│       │   │   │   ├── lyric/             // 歌词子系统
-│       │   │   │   │   ├── LyricManager.kt           // 歌词调度总线
-│       │   │   │   │   ├── extractor/                // 内嵌音频标签歌词提取器
-│       │   │   │   │   ├── model/                    // 歌词领域模型定义
-│       │   │   │   │   ├── online/                   // AMLL 在线词库客户端
-│       │   │   │   │   └── parser/                   // TTML 与 LRC 语法解析器
-│       │   │   │   ├── scanner/           // 文件系统遍历与元数据读取
-│       │   │   │   └── util/              // 拼音、歌手切分与字符集编码工具
-│       │   │   ├── service/               // 核心播放前台服务与音量控制
-│       │   │   └── ui/                    // 表现层 (Activity, Fragment, Adapters, 自定义 View)
-│       │   └── res/                       // 布局与可穿戴优化样式资源
-│       └── test/                          // 自动化单元测试矩阵 (71 个全覆盖测试用例)
-├── ARCHITECTURE.md                        // 系统架构与技术规格白皮书 (本文档)
-├── build.gradle.kts                       // 根工程构建脚本
-├── settings.gradle.kts                    // 仓库配置与模块声明
-└── gradle.properties                      // JVM 与编译参数调优
-```
-
----
-
-## 6. 测试体系与质量保证 (Testing & Verification)
-
-EnsoMusic 建立了覆盖核心算法与关键路径的严密单元测试矩阵，目前包含 **71 个自动化单元测试**，确保在无 UI 驱动下对边缘情况进行 100% 断言验证：
-
-- **`LyricParserTest` & `AmllResponseParseTest`**：
-  - 断言 TTML 命名空间解析合规性、时间戳转换毫秒精度；
-  - 验证西文音节级时间戳（Syllable-level）在拼接时无虚假多余空格；
-  - 验证 AMLL 真实 API 响应的 JSON 实体解包与多级回退匹配。
-- **`MetadataTrackSortingTest`**：
-  - 验证多盘（Disc 1 / Disc 2）、斜杠格式（`3/12`）、纯数字及文件名嗅探下的音轨排序准确性。
-- **`ArtistParserTest` & `ArtistParserChallengerTest`**：
-  - 验证多重中英混合连接符、全角符号以及带词界修饰的协作词切分，确保零误伤。
-- **`PinyinInitialHelperTest`**：
-  - 验证高频汉字、生僻字、特殊标点与多音字的拼音首字母映射。
-- **`FineVolumeControllerTest`**：
-  - 验证 100 阶细粒度音量软增益映射曲线的单调性与无越界。
-- **`LayoutIntegrityChallengerTest`**：
-  - 对 502×410 物理屏幕下的控件约束、最大高度及防裁切内边距进行静态反射断言。
-
----
-
-## 7. 演进路线图 (Future Roadmap)
-
-- [ ] **蓝牙硬件媒体控制协议 (AVRCP) 扩展**：进一步适配穿戴设备与外接蓝牙耳机的单击、双击、三击物理切歌指令。
-- [ ] **高精度音频重采样与 10 段均衡器 (EQ)**：引入基于 OpenSL ES 或 AAudio 的硬件直通轻量均衡器。
-- [ ] **歌词海报与微型分享视图**：支持从小屏截取当前播放片段并生成精美的 Apple Music 风格歌词卡片。
+- **单元测试**：通过 `./gradlew testDebugUnitTest` 执行。覆盖队列逻辑、扫描调度与路径边界、封面缓存键与取色、AMLL 超时预算与错误分类、歌词解析器、元数据排序、音量曲线映射及 XML 布局静态检查。
+- **真机基准测试**：仓库提供 PowerShell 自动化脚本（输出至 `benchmark-results/`），用于在目标硬件上采集并对比冷启动耗时、内存占用与运行时性能数据。
