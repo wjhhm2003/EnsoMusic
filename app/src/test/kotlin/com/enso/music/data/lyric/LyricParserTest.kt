@@ -161,6 +161,10 @@ class LyricParserTest {
         assertEquals("回声在此", bg.translation)
         assertNotNull(bg.words)
         assertEquals(2, bg.words!!.size)
+        assertEquals("Echo ", bg.words!![0].text)
+        assertEquals("here", bg.words!![1].text)
+        assertEquals(12600L, bg.words!![0].startTimeMs)
+        assertEquals(14500L, bg.words!![1].endTimeMs)
 
         // Line 2 assertions (Sidecar metadata)
         val line2 = lyricData.lines[1]
@@ -178,6 +182,30 @@ class LyricParserTest {
         assertEquals("明日", ruby.baseText)
         assertEquals("あした", ruby.rubyText)
         assertEquals(21000L, ruby.startTimeMs)
+    }
+
+    @Test
+    fun testTtmlBackgroundVocalsRemoveOnlyOuterBrackets() {
+        val ttml = """
+            <tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><div>
+              <p begin="1s" end="2s">Main<span ttm:role="x-bg">Plain background</span></p>
+              <p begin="3s" end="4s">Main<span ttm:role="x-bg">（<span begin="3s" end="4s">Echo (inside)</span>）</span></p>
+              <p begin="5s" end="6s">Main<span ttm:role="x-bg"><span begin="5s" end="6s">（Echo）</span></span></p>
+              <p begin="7s" end="8s">Main<span ttm:role="x-bg"><span begin="7s" end="8s">Echo (inside)</span></span></p>
+              <p begin="9s" end="10s">Main<span ttm:role="x-bg">(<span begin="9s" end="10s">(Echo)</span>)</span></p>
+            </div></body></tt>
+        """.trimIndent()
+
+        val lines = TtmlParser.parse(ttml).lines
+        assertEquals("Plain background", lines[0].bgVocals!![0].text)
+        assertNull(lines[0].bgVocals!![0].words)
+        assertEquals("Echo (inside)", lines[1].bgVocals!![0].text)
+        assertEquals("Echo (inside)", lines[1].bgVocals!![0].words!![0].text)
+        assertEquals("Echo", lines[2].bgVocals!![0].text)
+        assertEquals("Echo", lines[2].bgVocals!![0].words!![0].text)
+        assertEquals("Echo (inside)", lines[3].bgVocals!![0].words!![0].text)
+        assertEquals("(Echo)", lines[4].bgVocals!![0].text)
+        assertEquals("(Echo)", lines[4].bgVocals!![0].words!![0].text)
     }
 
     @Test

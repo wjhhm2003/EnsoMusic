@@ -5,24 +5,10 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/black"
-    android:paddingTop="6dp"
-    android:paddingBottom="12dp">
+    android:paddingTop="14dp"
+    android:paddingBottom="8dp">
 
-    <!-- Ambient backdrop tinted from the cover's dominant colour (set in code) -->
-    <View
-        android:id="@+id/viewAmbient"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_marginTop="-6dp"
-        android:layout_marginBottom="-12dp"
-        android:alpha="0"
-        android:importantForAccessibility="no"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-
-    <!-- Top Centered Cover Art: width-driven 1:1 card, capped at the requested 176dp. -->
+    <!-- Top centered cover art, slightly enlarged and shifted down for visual balance. -->
     <androidx.cardview.widget.CardView
         android:id="@+id/cardCover"
         android:layout_width="0dp"
@@ -33,8 +19,8 @@
         app:cardElevation="0dp"
         app:layout_constraintDimensionRatio="1:1"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintWidth_max="176dp"
-        app:layout_constraintWidth_percent="0.43"
+        app:layout_constraintWidth_max="184dp"
+        app:layout_constraintWidth_percent="0.46"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
 
@@ -50,16 +36,16 @@
     <TextView
         android:id="@+id/btnLyricCapsule"
         android:layout_width="wrap_content"
-        android:layout_height="32dp"
+        android:layout_height="38dp"
         android:background="@drawable/bg_volume_capsule"
         android:gravity="center"
-        android:minWidth="38dp"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
+        android:minWidth="44dp"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
         android:contentDescription="歌词"
         android:text="词"
         android:textColor="@color/white"
-        android:textSize="12sp"
+        android:textSize="14sp"
         android:textStyle="bold"
         app:layout_constraintBottom_toTopOf="@+id/btnSleepTimer"
         app:layout_constraintEnd_toStartOf="@+id/cardCover"
@@ -70,17 +56,17 @@
     <TextView
         android:id="@+id/btnSleepTimer"
         android:layout_width="wrap_content"
-        android:layout_height="32dp"
+        android:layout_height="38dp"
         android:layout_marginTop="10dp"
         android:background="@drawable/bg_volume_capsule"
         android:contentDescription="睡眠定时"
         android:gravity="center"
-        android:minWidth="38dp"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
+        android:minWidth="44dp"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
         android:text="☾"
         android:textColor="@color/white"
-        android:textSize="12sp"
+        android:textSize="14sp"
         android:textStyle="bold"
         app:layout_constraintBottom_toBottomOf="@+id/cardCover"
         app:layout_constraintEnd_toStartOf="@+id/cardCover"
@@ -91,14 +77,14 @@
     <TextView
         android:id="@+id/btnVolumeCapsule"
         android:layout_width="wrap_content"
-        android:layout_height="32dp"
+        android:layout_height="38dp"
         android:background="@drawable/bg_volume_capsule"
         android:gravity="center"
-        android:minWidth="46dp"
-        android:paddingStart="6dp"
-        android:paddingEnd="6dp"
+        android:minWidth="54dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
         android:textColor="@color/white"
-        android:textSize="11sp"
+        android:textSize="13sp"
         android:textStyle="bold"
         app:layout_constraintBottom_toBottomOf="@+id/cardCover"
         app:layout_constraintEnd_toEndOf="parent"
@@ -107,7 +93,7 @@
         tools:text="🔊 75%" />
 
     <!-- Dual-Line Centered Text: 8dp below cover art, strictly centered horizontally -->
-    <!-- Song Title: 18sp pure white (#FFFFFF), bold, single line marquee -->
+    <!-- Song title enlarged for stronger hierarchy; single-line marquee. -->
     <TextView
         android:id="@+id/tvTitle"
         android:layout_width="0dp"
@@ -123,14 +109,14 @@
         android:scrollHorizontally="true"
         android:singleLine="true"
         android:textColor="@color/white"
-        android:textSize="18sp"
+        android:textSize="20sp"
         android:textStyle="bold"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/cardCover"
         tools:text="唉 (pt.3)" />
 
-    <!-- Subtitle: 13sp cold grey (#8E8E93), format "歌手 · 专辑", single line ellipsis -->
+    <!-- Subtitle: slightly enlarged, secondary grey, single-line ellipsis. -->
     <TextView
         android:id="@+id/tvArtistAlbum"
         android:layout_width="0dp"
@@ -142,23 +128,23 @@
         android:gravity="center"
         android:singleLine="true"
         android:textColor="@color/text_secondary"
-        android:textSize="13sp"
+        android:textSize="14sp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/tvTitle"
         tools:text="张方钊, 大D(DLyn) · 唉 (pt.3)" />
 
-    <!-- Refined Minimalist 3dp SeekBar: 28dp hitbox, 3dp thin track, 11dp thumb without clipping -->
+    <!-- Thicker, easier-to-scrub progress bar with a larger thumb. -->
     <SeekBar
         android:id="@+id/sbProgress"
         android:layout_width="0dp"
-        android:layout_height="28dp"
+        android:layout_height="36dp"
         android:layout_marginStart="22dp"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="12dp"
         android:layout_marginEnd="22dp"
         android:max="1000"
-        android:maxHeight="3dp"
-        android:minHeight="3dp"
+        android:maxHeight="6dp"
+        android:minHeight="6dp"
         android:paddingStart="10dp"
         android:paddingEnd="10dp"
         android:progressDrawable="@drawable/bg_seekbar_thin_track"
@@ -178,7 +164,7 @@
         android:fontFeatureSettings="tnum"
         android:text="00:00"
         android:textColor="@color/text_secondary"
-        android:textSize="10sp"
+        android:textSize="12sp"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/sbProgress" />
 
@@ -191,37 +177,37 @@
         android:fontFeatureSettings="tnum"
         android:text="00:00"
         android:textColor="@color/text_secondary"
-        android:textSize="10sp"
+        android:textSize="12sp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/sbProgress" />
 
-    <!-- 5 Symmetric Control Buttons: Well-spaced, comfortable touch targets, vertical_bias=0.4 -->
-    <!-- Left 1: btnPlayMode (touch target 46dp x 46dp, icon 24dp) -->
+    <!-- 5 symmetric, enlarged playback controls, weighted slightly lower on the page. -->
+    <!-- Left 1: btnPlayMode (52dp touch target). -->
     <ImageView
         android:id="@+id/btnPlayMode"
-        android:layout_width="46dp"
-        android:layout_height="46dp"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
         android:layout_marginStart="14dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="播放模式"
-        android:padding="11dp"
+        android:padding="10dp"
         android:src="@drawable/ic_repeat_all_24"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toStartOf="@+id/btnPrevious"
         app:layout_constraintHorizontal_chainStyle="spread_inside"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@+id/sbProgress"
-        app:layout_constraintVertical_bias="0.4"
+        app:layout_constraintVertical_bias="0.56"
         app:tint="@color/white" />
 
-    <!-- Left 2: btnPrevious (touch target 46dp x 46dp, icon 24dp) -->
+    <!-- Left 2: btnPrevious (52dp touch target). -->
     <ImageView
         android:id="@+id/btnPrevious"
-        android:layout_width="46dp"
-        android:layout_height="46dp"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="上一首"
-        android:padding="11dp"
+        android:padding="10dp"
         android:src="@drawable/ic_skip_previous_24"
         app:layout_constraintBottom_toBottomOf="@+id/btnPlayPause"
         app:layout_constraintEnd_toStartOf="@+id/btnPlayPause"
@@ -229,29 +215,29 @@
         app:layout_constraintTop_toTopOf="@+id/btnPlayPause"
         app:tint="@color/white" />
 
-    <!-- Center: btnPlayPause (54dp x 54dp Morandi green circular button @drawable/bg_circle_accent) -->
+    <!-- Center: enlarged 68dp accent play/pause button. -->
     <ImageView
         android:id="@+id/btnPlayPause"
-        android:layout_width="54dp"
-        android:layout_height="54dp"
+        android:layout_width="68dp"
+        android:layout_height="68dp"
         android:background="@drawable/bg_circle_accent"
         android:contentDescription="播放暂停"
         android:elevation="2dp"
-        android:padding="13dp"
+        android:padding="17dp"
         android:src="@drawable/ic_play_24"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toStartOf="@+id/btnNext"
         app:layout_constraintStart_toEndOf="@+id/btnPrevious"
         app:layout_constraintTop_toBottomOf="@+id/sbProgress"
-        app:layout_constraintVertical_bias="0.4"
+        app:layout_constraintVertical_bias="0.56"
         app:tint="@color/white" />
 
     <!-- Spinner ring around the play button while the decoder prepares -->
     <ProgressBar
         android:id="@+id/pbBuffering"
         style="?android:attr/progressBarStyle"
-        android:layout_width="62dp"
-        android:layout_height="62dp"
+        android:layout_width="76dp"
+        android:layout_height="76dp"
         android:elevation="3dp"
         android:indeterminateTint="@color/white"
         android:visibility="gone"
@@ -260,14 +246,14 @@
         app:layout_constraintStart_toStartOf="@+id/btnPlayPause"
         app:layout_constraintTop_toTopOf="@+id/btnPlayPause" />
 
-    <!-- Right 2: btnNext (touch target 46dp x 46dp, icon 24dp) -->
+    <!-- Right 2: btnNext (52dp touch target). -->
     <ImageView
         android:id="@+id/btnNext"
-        android:layout_width="46dp"
-        android:layout_height="46dp"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="下一首"
-        android:padding="11dp"
+        android:padding="10dp"
         android:src="@drawable/ic_skip_next_24"
         app:layout_constraintBottom_toBottomOf="@+id/btnPlayPause"
         app:layout_constraintEnd_toStartOf="@+id/btnQueue"
@@ -275,15 +261,15 @@
         app:layout_constraintTop_toTopOf="@+id/btnPlayPause"
         app:tint="@color/white" />
 
-    <!-- Right 1: btnQueue (touch target 46dp x 46dp, icon 24dp) -->
+    <!-- Right 1: btnQueue (52dp touch target). -->
     <ImageView
         android:id="@+id/btnQueue"
-        android:layout_width="46dp"
-        android:layout_height="46dp"
+        android:layout_width="52dp"
+        android:layout_height="52dp"
         android:layout_marginEnd="14dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:contentDescription="播放队列"
-        android:padding="11dp"
+        android:padding="10dp"
         android:src="@drawable/ic_queue_music_24"
         app:layout_constraintBottom_toBottomOf="@+id/btnPlayPause"
         app:layout_constraintEnd_toEndOf="parent"

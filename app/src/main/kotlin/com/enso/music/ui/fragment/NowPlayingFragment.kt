@@ -1,7 +1,5 @@
 package com.enso.music.ui.fragment
 
-import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
 import android.os.Bundle
 import android.os.SystemClock
@@ -11,7 +9,6 @@ import android.view.ViewGroup
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
-import androidx.core.graphics.ColorUtils
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -46,10 +43,9 @@ class NowPlayingFragment : Fragment() {
     private var progressJob: Job? = null
     private var volumeAutoHideJob: Job? = null
     private var sleepLabelJob: Job? = null
-    private var ambientJob: Job? = null
     private var isScreenOn = true
 
-    /** Path of the song whose cover/ambient are currently bound. */
+    /** Path of the song whose cover is currently bound. */
     private var boundSongPath: String? = null
     private var boundCoverPath: String? = null
     private var isCoverBound = false
@@ -562,56 +558,6 @@ class NowPlayingFragment : Fragment() {
             R.drawable.ic_music_note_24,
             viewLifecycleOwner.lifecycleScope
         )
-        updateAmbient(coverPath)
-    }
-
-    /** Tints the page with a visible, dark gradient derived from the cover. */
-    private fun updateAmbient(coverPath: String?) {
-        ambientJob?.cancel()
-        val ambient = binding.viewAmbient
-        if (coverPath.isNullOrBlank()) {
-            ambient.animate().alpha(0f).setDuration(300).start()
-            return
-        }
-        val appContext = requireContext().applicationContext
-        ambientJob = viewLifecycleOwner.lifecycleScope.launch {
-            val coverManager = CoverManager.getInstance(appContext)
-            // Cover extraction and playback-state delivery can finish in either
-            // order. Retry once so the background is not permanently left black
-            // when the cover file is still being written into the cache.
-            var color = withContext(Dispatchers.IO) {
-                coverManager.getDominantColor(coverPath)
-            }
-            if (color == null) {
-                delay(120L)
-                color = withContext(Dispatchers.IO) {
-                    coverManager.getDominantColor(coverPath)
-                }
-            }
-            if (_binding == null || boundCoverPath != coverPath) return@launch
-
-            // Keep the feature visible even for legacy songs whose cover path is
-            // readable by the ImageView but cannot be sampled for a dominant hue.
-            val resolvedColor = color ?: Color.rgb(92, 42, 76)
-            ambient.background = GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(
-                    ambientTint(resolvedColor, 0.58f),
-                    ambientTint(resolvedColor, 0.30f),
-                    Color.BLACK
-                )
-            )
-            ambient.animate().alpha(1f).setDuration(450).start()
-        }
-    }
-
-    /** Keeps the cover hue visible while preserving contrast for white text. */
-    private fun ambientTint(color: Int, lightness: Float): Int {
-        val hsl = FloatArray(3)
-        ColorUtils.colorToHSL(color, hsl)
-        hsl[1] = (hsl[1] * 0.88f).coerceIn(0.32f, 0.78f)
-        hsl[2] = (hsl[2].coerceAtMost(lightness) * 0.82f).coerceIn(0.12f, 0.48f)
-        return ColorUtils.HSLToColor(hsl)
     }
 
     private fun updateProgressBar(posMs: Long, durMs: Long) {
@@ -692,7 +638,6 @@ class NowPlayingFragment : Fragment() {
         volumeAutoHideJob?.cancel()
         volumeAutoHideJob = null
         sleepLabelJob?.cancel()
-        ambientJob?.cancel()
         boundSongPath = null
         boundCoverPath = null
         isCoverBound = false

@@ -883,12 +883,21 @@ class MusicPlaybackService : Service(),
     // Volume / fades
     // =========================================================================
 
-    private fun applyVolume(player: MediaPlayer? = mediaPlayer) {
+    /**
+     * Apply the current gain to both active and preloaded players by default.
+     * The next player can be prepared well before promotion; keeping it in sync
+     * prevents a volume/duck/fade change near the track boundary from causing
+     * a perceptible level jump. Pass a player to update only that instance.
+     */
+    private fun applyVolume(player: MediaPlayer? = null) {
         val gain = FineVolume.gain(fineVolumePercent) * duckFactor * fadeFactor
-        try {
-            player?.setVolume(gain, gain)
-        } catch (e: IllegalStateException) {
-            Log.w(TAG, "setVolume failed", e)
+        val targets = if (player != null) listOf(player) else listOfNotNull(mediaPlayer, nextMediaPlayer)
+        for (target in targets) {
+            try {
+                target.setVolume(gain, gain)
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "setVolume failed", e)
+            }
         }
     }
 

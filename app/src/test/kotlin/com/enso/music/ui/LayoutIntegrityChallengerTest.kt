@@ -59,16 +59,17 @@ class LayoutIntegrityChallengerTest {
         assertEquals("Root must be ConstraintLayout", "androidx.constraintlayout.widget.ConstraintLayout", root.tagName)
         assertEquals("Root width must match parent", "match_parent", root.getAttribute("android:layout_width"))
         assertEquals("Root height must match parent", "match_parent", root.getAttribute("android:layout_height"))
+        assertEquals("Playback page background must remain pure black", "@color/black", root.getAttribute("android:background"))
 
-        // Safe padding to prevent clipping at bottom edge
-        assertEquals("Root paddingTop must be 6dp", 6, parseDp(root.getAttribute("android:paddingTop")))
-        assertEquals("Root paddingBottom must be 12dp", 12, parseDp(root.getAttribute("android:paddingBottom")))
+        // Keep breathing room at the edges while shifting the composition down.
+        assertEquals("Root paddingTop must be 14dp", 14, parseDp(root.getAttribute("android:paddingTop")))
+        assertEquals("Root paddingBottom must be 8dp", 8, parseDp(root.getAttribute("android:paddingBottom")))
 
-        // 1. Cover Card - width-driven adaptive square (~43%, max 176dp)
+        // 1. Cover Card - width-driven adaptive square, enlarged and still capped.
         val cardCover = findElementById(root, "cardCover")!!
         assertEquals("Cover dimension ratio must be 1:1", "1:1", cardCover.getAttribute("app:layout_constraintDimensionRatio"))
-        assertEquals("Cover max width must be 176dp", 176, parseDp(cardCover.getAttribute("app:layout_constraintWidth_max")))
-        assertEquals("Cover percent width must be 0.43", "0.43", cardCover.getAttribute("app:layout_constraintWidth_percent"))
+        assertEquals("Cover max width must be 184dp", 184, parseDp(cardCover.getAttribute("app:layout_constraintWidth_max")))
+        assertEquals("Cover percent width must be 0.46", "0.46", cardCover.getAttribute("app:layout_constraintWidth_percent"))
 
         // 2. Title & Subtitle Text
         val tvTitle = findElementById(root, "tvTitle")!!
@@ -83,19 +84,23 @@ class LayoutIntegrityChallengerTest {
         val sbProgress = findElementById(root, "sbProgress")!!
         val seekbarTopMargin = parseDp(sbProgress.getAttribute("android:layout_marginTop"))
         val seekbarHeight = parseDp(sbProgress.getAttribute("android:layout_height"))
-        assertEquals("SeekBar top margin must be 8dp", 8, seekbarTopMargin)
-        assertEquals("SeekBar hitbox height must be 28dp", 28, seekbarHeight)
-        assertEquals("SeekBar maxHeight must be 3dp", 3, parseDp(sbProgress.getAttribute("android:maxHeight")))
-        assertEquals("SeekBar minHeight must be 3dp", 3, parseDp(sbProgress.getAttribute("android:minHeight")))
+        assertEquals("SeekBar top margin must be 12dp", 12, seekbarTopMargin)
+        assertEquals("SeekBar hitbox height must be 36dp", 36, seekbarHeight)
+        assertEquals("SeekBar maxHeight must be 6dp", 6, parseDp(sbProgress.getAttribute("android:maxHeight")))
+        assertEquals("SeekBar minHeight must be 6dp", 6, parseDp(sbProgress.getAttribute("android:minHeight")))
 
         // 4. Control buttons
         val btnPlayPause = findElementById(root, "btnPlayPause")!!
         val controlsHeight = parseDp(btnPlayPause.getAttribute("android:layout_height"))
-        assertEquals("Center play/pause button height must be 54dp", 54, controlsHeight)
+        assertEquals("Center play/pause button height must be 68dp", 68, controlsHeight)
+
+        assertEquals("Control row must be weighted below center", "0.56", btnPlayPause.getAttribute("app:layout_constraintVertical_bias"))
 
         // 5. Duplicate Capsule Indicator must be completely removed
         val indicatorCapsule = findElementById(root, "indicatorCapsule")
         assertNull("Duplicate indicatorCapsule must be completely removed", indicatorCapsule)
+
+        assertNull("Cover-tinted ambient background must be removed", findElementById(root, "viewAmbient"))
     }
 
     @Test

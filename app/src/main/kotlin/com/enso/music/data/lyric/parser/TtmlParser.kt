@@ -354,6 +354,7 @@ object TtmlParser {
         val bgEnd = TimeUtils.parseTimeToMs(parser.getAttributeByLocalName("end")) ?: defaultEnd
 
         val bgWords = ArrayList<LyricWord>()
+        val bgWordOffsets = ArrayList<Int>()
         val textBuilder = StringBuilder()
         var bgTranslation: String? = null
         var bgTransliteration: String? = null
@@ -377,6 +378,7 @@ object TtmlParser {
                                 val sBegin = TimeUtils.parseTimeToMs(parser.getAttributeByLocalName("begin")) ?: bgStart
                                 val sEnd = TimeUtils.parseTimeToMs(parser.getAttributeByLocalName("end")) ?: bgEnd
                                 val sText = parser.nextText()
+                                bgWordOffsets.add(textBuilder.length)
                                 textBuilder.append(sText)
                                 bgWords.add(LyricWord(startTimeMs = sBegin, endTimeMs = sEnd, text = sText))
                             }
@@ -404,12 +406,37 @@ object TtmlParser {
             eventType = parser.next()
         }
 
-        var cleanedText = textBuilder.toString().trim()
+        val rawText = textBuilder.toString()
+        var cleanedText = rawText.trim()
+        val brackets = when {
+            cleanedText.startsWith("(") && cleanedText.endsWith(")") -> '(' to ')'
+            cleanedText.startsWith("（") && cleanedText.endsWith("）") -> '（' to '）'
+            else -> null
+        }
         // Clean outer wrapping brackets e.g. "(chorus)" -> "chorus"
-        if (cleanedText.startsWith("(") && cleanedText.endsWith(")")) {
+        if (brackets != null) {
             cleanedText = cleanedText.substring(1, cleanedText.length - 1).trim()
-        } else if (cleanedText.startsWith("（") && cleanedText.endsWith("）")) {
-            cleanedText = cleanedText.substring(1, cleanedText.length - 1).trim()
+            val first = bgWords.indexOfFirst { it.text.isNotBlank() }
+            val last = bgWords.indexOfLast { it.text.isNotBlank() }
+            val openingOffset = rawText.indexOfFirst { !it.isWhitespace() }
+            val closingOffset = rawText.indexOfLast { !it.isWhitespace() }
+            var openingRemoved = false
+            if (first >= 0) {
+                val word = bgWords[first]
+                val index = word.text.indexOfFirst { !it.isWhitespace() }
+                if (bgWordOffsets[first] + index == openingOffset && word.text[index] == brackets.first) {
+                    bgWords[first] = word.copy(text = word.text.removeRange(index, index + 1))
+                    openingRemoved = true
+                }
+            }
+            if (last >= 0) {
+                val word = bgWords[last]
+                val index = word.text.indexOfLast { !it.isWhitespace() }
+                val originalOffset = bgWordOffsets[last] + index + if (openingRemoved && first == last) 1 else 0
+                if (index >= 0 && originalOffset == closingOffset && word.text[index] == brackets.second) {
+                    bgWords[last] = word.copy(text = word.text.removeRange(index, index + 1))
+                }
+            }
         }
 
         if (cleanedText.isEmpty()) return null

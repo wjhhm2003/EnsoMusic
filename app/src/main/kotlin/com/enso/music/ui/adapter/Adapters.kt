@@ -36,6 +36,7 @@ object FormatUtils {
 class SongAdapter(
     private val scope: CoroutineScope,
     private val onItemLongClick: ((song: SongEntity) -> Unit)? = null,
+    private val showTrackNumber: Boolean = false,
     private val onItemClick: (index: Int, song: SongEntity) -> Unit
 ) : ListAdapter<SongEntity, SongAdapter.SongViewHolder>(DiffCallback) {
 
@@ -105,7 +106,11 @@ class SongAdapter(
         }
 
         fun bind(song: SongEntity) {
-            binding.tvTitle.text = song.title
+            binding.tvTitle.text = if (showTrackNumber && song.trackNumber > 0) {
+                "${song.trackNumber.toString().padStart(2, '0')}  ${song.title}"
+            } else {
+                song.title
+            }
             bindPlayingState(song)
 
             val subtitle = if (song.album.isBlank()) {

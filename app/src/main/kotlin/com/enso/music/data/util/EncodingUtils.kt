@@ -53,6 +53,15 @@ object EncodingUtils {
 
         // Check if there are extended ASCII / Latin-1 bytes misread
         if (containsSuspiciousLatin1(trimmed)) {
+            // U+00D8 LATIN CAPITAL LETTER O WITH STROKE (Ø) is valid Unicode,
+            // not a mojibake marker. Interpreting its single Latin-1 byte as
+            // the lead byte of GBK can turn the following "N" into a CJK glyph
+            // (e.g. OBLIVIØN -> OBLIVI豐) and split otherwise identical albums.
+            val textWithoutKnownLatinLetters = trimmed
+                .replace("Ø", "")
+                .replace("ø", "")
+            if (!containsSuspiciousLatin1(textWithoutKnownLatinLetters)) return trimmed
+
             try {
                 val bytes = trimmed.toByteArray(CHARSET_ISO_8859_1)
 

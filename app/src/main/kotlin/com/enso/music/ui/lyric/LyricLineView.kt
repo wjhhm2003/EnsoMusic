@@ -417,7 +417,7 @@ class LyricLineView @JvmOverloads constructor(
         } else if (!line.bgVocals.isNullOrEmpty()) {
             val bg = line.bgVocals.first()
             val p = if (isCurrentActiveLine) paintBgHighlight else paintBgNormal
-            val bgText = "(${bg.text})"
+            val bgText = bg.text
             val bgW = p.measureText(bgText)
             val bgMaxScroll = (bgW - usableWidth).coerceAtLeast(0f)
             val bgScroll = if (isCurrentActiveLine) bgMaxScroll * lineProgress else 0f
