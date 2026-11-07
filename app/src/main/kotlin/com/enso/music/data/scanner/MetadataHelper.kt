@@ -23,6 +23,9 @@ class MetadataHelper(private val context: Context) {
         var rawAlbum: String? = null
         var rawTrack: String? = null
         var durationMs = 0L
+        // Read the embedded picture from this retriever so CoverManager does
+        // not have to open the same file a second time.
+        var embeddedPicture: ByteArray? = null
 
         val retriever = MediaMetadataRetriever()
         try {
@@ -33,6 +36,11 @@ class MetadataHelper(private val context: Context) {
             rawTrack = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)
             val durStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
             durationMs = durStr?.toLongOrNull() ?: 0L
+            embeddedPicture = try {
+                retriever.embeddedPicture
+            } catch (ignored: Exception) {
+                null
+            }
         } catch (ignored: Exception) {
         } finally {
             try {
@@ -51,7 +59,7 @@ class MetadataHelper(private val context: Context) {
         val sortKey = PinyinInitialHelper.getSortKey(title)
 
         // Extract thumbnail to cache
-        val coverPath = coverManager.extractCoverToCache(path)
+        val coverPath = coverManager.extractCoverToCache(path, embeddedPicture)
 
         return SongEntity(
             path = path,

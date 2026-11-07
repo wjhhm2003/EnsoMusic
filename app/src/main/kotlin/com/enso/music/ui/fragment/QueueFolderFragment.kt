@@ -30,6 +30,8 @@ import com.enso.music.ui.dialog.FolderPickerDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -56,7 +58,7 @@ class QueueFolderFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        folderScanner = FolderScanner(requireContext())
+        folderScanner = FolderScanner.getInstance(requireContext())
         initAdapters()
         setupViews()
         observeData()
@@ -67,7 +69,12 @@ class QueueFolderFragment : Fragment() {
     }
 
     private fun initAdapters() {
-        queueAdapter = QueueAdapter { index ->
+        queueAdapter = QueueAdapter(
+            onItemLongClick = { index, song ->
+                getService()?.removeFromQueue(index)
+                Toast.makeText(requireContext(), getString(R.string.queue_removed, song.title), Toast.LENGTH_SHORT).show()
+            }
+        ) { index ->
             getService()?.playQueueItem(index)
             (activity as? MainActivity)?.navigateToPage(1)
         }
@@ -100,17 +107,9 @@ class QueueFolderFragment : Fragment() {
         binding.tabQueue.setOnClickListener { switchTab(Tab.QUEUE) }
         binding.tabFolders.setOnClickListener { switchTab(Tab.FOLDERS) }
 
-        binding.btnIncrementalScan.setOnClickListener {
-            viewLifecycleOwner.lifecycleScope.launch {
-                folderScanner.startScan(isFullRescan = false)
-            }
-        }
-
-        binding.btnFullScan.setOnClickListener {
-            viewLifecycleOwner.lifecycleScope.launch {
-                folderScanner.startScan(isFullRescan = true)
-            }
-        }
+        // Scans run on the scanner's own scope so leaving this page doesn't cancel them.
+        binding.btnIncrementalScan.setOnClickListener { folderScanner.requestScan(isFullRescan = false) }
+        binding.btnFullScan.setOnClickListener { folderScanner.requestScan(isFullRescan = true) }
 
         binding.btnAddFolder.setOnClickListener {
             FolderPickerDialog(requireContext()) { selectedPath ->
@@ -118,6 +117,7 @@ class QueueFolderFragment : Fragment() {
                     AppDatabase.getInstance(requireContext())
                         .scanFolderDao()
                         .insertFolder(ScanFolderEntity(path = selectedPath, isSelected = true))
+                folderScanner.requestScan(isFullRescan = false)
                 }
             }.show()
         }
@@ -162,14 +162,19 @@ class QueueFolderFragment : Fragment() {
                             launch {
                                 service.currentQueue.collect { queue ->
                                     val curIndex = service.playbackInfo.value.currentIndex
+                                    val firstFill = queueAdapter.itemCount == 0
                                     queueAdapter.updateList(queue, curIndex)
                                     binding.tvEmptyQueue.visibility = if (queue.isEmpty()) View.VISIBLE else View.GONE
+                                    binding.tabQueue.text = if (queue.isEmpty()) getString(R.string.tab_queue)
+                                    else getString(R.string.tab_queue) + " " + queue.size
+                                    if (firstFill) scrollQueueToCurrent(curIndex)
                                 }
                             }
                             launch {
-                                service.playbackInfo.collect { info ->
-                                    queueAdapter.setPlayingIndex(info.currentIndex)
-                                }
+                                service.playbackInfo
+                                    .map { it.currentIndex }
+                                    .distinctUntilChanged()
+                                    .collect { index -> queueAdapter.setPlayingIndex(index) }
                             }
                         }
                     }
@@ -194,15 +199,17 @@ class QueueFolderFragment : Fragment() {
                     if (progress.isScanning) {
                         binding.pbScanning.visibility = View.VISIBLE
                         binding.tvScanStatus.visibility = View.VISIBLE
-                        binding.tvScanStatus.text = "扫描中: ${progress.currentPath} (${progress.totalFound})"
+                        binding.tvScanStatus.text = getString(R.string.scan_progress, progress.currentPath, progress.totalFound)
                     } else {
                         binding.pbScanning.visibility = View.GONE
                         if (progress.totalFound > 0 || progress.addedOrUpdated > 0 || progress.removedCount > 0) {
                             binding.tvScanStatus.visibility = View.VISIBLE
-                            binding.tvScanStatus.text = "完成: 发现 ${progress.totalFound} 首 (新增 ${progress.addedOrUpdated}, 移除 ${progress.removedCount})"
+                            binding.tvScanStatus.text = getString(
+                                R.string.scan_done, progress.totalFound, progress.addedOrUpdated, progress.removedCount
+                            )
                         } else if (progress.error != null) {
                             binding.tvScanStatus.visibility = View.VISIBLE
-                            binding.tvScanStatus.text = "提示: ${progress.error}"
+                            binding.tvScanStatus.text = getString(R.string.scan_error, progress.error)
                         }
                     }
                 }
@@ -233,6 +240,19 @@ class QueueFolderFragment : Fragment() {
             }
         }
     }
+
+    private fun scrollQueueToCurrent(index: Int) {
+        if (index < 0) return
+        (binding.rvQueue.layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(index, dp(40))
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Bring the current song into view each time the page is shown.
+        getService()?.playbackInfo?.value?.currentIndex?.let { scrollQueueToCurrent(it) }
+    }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
     override fun onDestroyView() {
         _binding = null

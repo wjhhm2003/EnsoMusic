@@ -11,6 +11,13 @@ import kotlinx.coroutines.*
 class LyricManager private constructor(context: Context) {
 
     companion object {
+        /**
+         * How long to wait after delivering the local result before going online. If the
+         * user skips to another song within this window the Job is cancelled and no
+         * network request is made.
+         */
+        private const val ONLINE_DEBOUNCE_MS = 700L
+
         @Volatile
         private var instance: LyricManager? = null
 
@@ -29,9 +36,13 @@ class LyricManager private constructor(context: Context) {
     private val memoryCache = LruCache<String, LyricData>(8)
 
     /**
-     * Loads lyric for the given song with two-stage callback:
+     * Loads lyric for the given song with two-stage callback (always on Dispatchers.Main):
      * 1. Returns local/cached lyric immediately.
-     * 2. If local was not a TTML file, fetches online AMLL TTML in background and upgrades if found.
+     * 2. If local was not a TTML file, waits a short debounce, then fetches online AMLL
+     *    TTML and upgrades if found.
+     *
+     * Cancelling the returned Job (e.g. on song change) stops the work, including the
+     * debounce delay and any in-flight network request.
      */
     fun loadLyric(
         song: SongEntity,
@@ -43,52 +54,54 @@ class LyricManager private constructor(context: Context) {
         return scope.launch {
             val hasPhysicalTtml = localExtractor.hasLocalTtmlFile(song.path)
 
+            // Stage 1: memory cache, then local disk / embedded (zero network)
+            var localResult: LyricData? = null
+            var localDelivered = false
             if (!forceOnlineRefresh) {
-                val cachedInMemory = memoryCache.get(cacheKey)
-                if (cachedInMemory != null) {
-                    withContext(Dispatchers.Main) {
-                        onLyricLoaded(cachedInMemory)
-                    }
-                    if (hasPhysicalTtml) {
-                        return@launch
-                    }
+                localResult = memoryCache.get(cacheKey)
+                    ?: localExtractor.loadLocalLyric(song)?.also { memoryCache.put(cacheKey, it) }
+                if (localResult != null) {
+                    deliver(localResult, onLyricLoaded)
+                    localDelivered = true
+                    // A physical .ttml (sibling or cached download) is the best we can get.
+                    if (hasPhysicalTtml) return@launch
                 }
             }
 
-            // Stage 1: Try local first (zero latency)
-            val localResult = if (!forceOnlineRefresh) localExtractor.loadLocalLyric(song) else null
-            if (localResult != null) {
-                memoryCache.put(cacheKey, localResult)
-                withContext(Dispatchers.Main) {
-                    onLyricLoaded(localResult)
-                }
-                // If local already has a physical .ttml file, we are done
-                if (hasPhysicalTtml) {
-                    return@launch
-                }
+            // Debounce: don't hit the network for songs the user is just skipping through.
+            if (!forceOnlineRefresh) {
+                delay(ONLINE_DEBOUNCE_MS)
             }
 
-            // Stage 2: Background online search from AMLL TTML library
+            // Stage 2: online search from AMLL TTML library (cancellable, runs on IO)
             val onlineTtml = amllRepository.fetchAndCacheTtml(song, forceRefresh = forceOnlineRefresh)
+            ensureActive()
             if (onlineTtml != null && onlineTtml.isNotEmpty()) {
                 memoryCache.put(cacheKey, onlineTtml)
-                withContext(Dispatchers.Main) {
-                    onLyricLoaded(onlineTtml)
-                }
-            } else {
-                // Online search failed or timed out: Fall back to local embedded/LRC lyrics
-                val fallbackLocal = localResult ?: localExtractor.loadLocalLyric(song)
-                if (fallbackLocal != null && fallbackLocal.isNotEmpty()) {
-                    memoryCache.put(cacheKey, fallbackLocal)
-                    withContext(Dispatchers.Main) {
-                        onLyricLoaded(fallbackLocal)
-                    }
-                } else if (localResult == null) {
-                    withContext(Dispatchers.Main) {
-                        onLyricLoaded(LyricData.EMPTY)
-                    }
-                }
+                deliver(onlineTtml, onLyricLoaded)
+                return@launch
             }
+
+            // Online search failed / found nothing: fall back to local embedded/LRC lyrics.
+            if (localDelivered) return@launch // already showing the local lyric; keep it
+
+            val fallbackLocal = localResult
+                ?: localExtractor.loadLocalLyric(song)
+                // On a forced refresh that came back empty, keep whatever we had before.
+                ?: memoryCache.get(cacheKey)
+            if (fallbackLocal != null && fallbackLocal.isNotEmpty()) {
+                memoryCache.put(cacheKey, fallbackLocal)
+                deliver(fallbackLocal, onLyricLoaded)
+            } else {
+                deliver(LyricData.EMPTY, onLyricLoaded)
+            }
+        }
+    }
+
+    private suspend fun deliver(data: LyricData, onLyricLoaded: (LyricData) -> Unit) {
+        withContext(Dispatchers.Main) {
+            ensureActive()
+            onLyricLoaded(data)
         }
     }
 

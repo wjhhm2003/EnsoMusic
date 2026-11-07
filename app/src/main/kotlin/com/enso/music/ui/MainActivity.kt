@@ -16,7 +16,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.lifecycleScope
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
 import com.enso.music.R
@@ -41,8 +40,15 @@ class MainActivity : AppCompatActivity() {
     private val _serviceConnectedFlow = MutableStateFlow(false)
     val serviceConnectedFlow: StateFlow<Boolean> = _serviceConnectedFlow.asStateFlow()
 
-    private var nowPlayingFragment: NowPlayingFragment? = null
-    private var libraryFragment: LibraryFragment? = null
+    // ViewPager2's FragmentStateAdapter tags pages "f<itemId>". Look them up
+    // instead of caching references, which go stale after the system restores
+    // fragments on process recreation.
+    private val nowPlayingFragment: NowPlayingFragment?
+        get() = supportFragmentManager.findFragmentByTag("f1") as? NowPlayingFragment
+    private val libraryFragment: LibraryFragment?
+        get() = supportFragmentManager.findFragmentByTag("f0") as? LibraryFragment
+
+    private var isServiceBound = false
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -82,19 +88,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupViewPager() {
-        val fragments = listOf(
-            LibraryFragment().also { libraryFragment = it },
-            NowPlayingFragment().also { nowPlayingFragment = it },
-            QueueFolderFragment()
-        )
-
         binding.viewPager.adapter = object : FragmentStateAdapter(this) {
-            override fun getItemCount(): Int = fragments.size
-            override fun createFragment(position: Int): Fragment = fragments[position]
+            override fun getItemCount(): Int = 3
+            override fun createFragment(position: Int): Fragment = when (position) {
+                0 -> LibraryFragment()
+                1 -> NowPlayingFragment()
+                else -> QueueFolderFragment()
+            }
         }
+        // Keep all three pages alive: swiping never re-inflates a page.
+        binding.viewPager.offscreenPageLimit = 2
 
-        // Set default screen to Page 1: Now Playing (Center)
+        // Always land on the Now Playing page. A stale ViewPager2 saved state can
+        // otherwise restore the library page and make the primary screen appear
+        // to be missing after the app is relaunched by the watch system.
         binding.viewPager.setCurrentItem(1, false)
+        binding.viewPager.post {
+            if (!isFinishing && binding.viewPager.currentItem != 1) {
+                binding.viewPager.setCurrentItem(1, false)
+            }
+        }
 
         binding.viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
@@ -108,17 +121,16 @@ class MainActivity : AppCompatActivity() {
         val selected = ContextCompat.getDrawable(this, R.drawable.bg_pill_selected)
         val unselected = ContextCompat.getDrawable(this, R.drawable.bg_circle_card)
 
-        binding.dot0.background = if (position == 0) selected else unselected
-        binding.dot0.layoutParams.width = if (position == 0) dpToPx(14) else dpToPx(5)
-        binding.dot0.requestLayout()
-
-        binding.dot1.background = if (position == 1) selected else unselected
-        binding.dot1.layoutParams.width = if (position == 1) dpToPx(14) else dpToPx(5)
-        binding.dot1.requestLayout()
-
-        binding.dot2.background = if (position == 2) selected else unselected
-        binding.dot2.layoutParams.width = if (position == 2) dpToPx(14) else dpToPx(5)
-        binding.dot2.requestLayout()
+        val dots = arrayOf(binding.dot0, binding.dot1, binding.dot2)
+        for ((i, dot) in dots.withIndex()) {
+            val active = i == position
+            dot.background = if (active) selected else unselected
+            val targetWidth = if (active) dpToPx(14) else dpToPx(5)
+            if (dot.layoutParams.width != targetWidth) {
+                dot.layoutParams.width = targetWidth
+                dot.requestLayout()
+            }
+        }
     }
 
     private fun dpToPx(dp: Int): Int {
@@ -138,7 +150,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             startService(intent)
         }
-        bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+        isServiceBound = bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
     private fun registerScreenReceiver() {
@@ -170,11 +182,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun triggerInitialScanIfEmpty() {
-        lifecycleScope.launch {
-            val scanner = FolderScanner(this@MainActivity)
-            scanner.ensureDefaultFoldersConfigured()
-            scanner.startScan(isFullRescan = false)
-        }
+        // Scans run on the scanner's own scope so they survive config changes
+        // and the folder page sees the same progress.
+        FolderScanner.getInstance(this).requestScan(isFullRescan = false)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -223,8 +233,9 @@ class MainActivity : AppCompatActivity() {
             unregisterReceiver(screenReceiver)
         } catch (ignored: Exception) {
         }
-        if (_serviceConnectedFlow.value) {
-            unbindService(serviceConnection)
+        if (isServiceBound) {
+            runCatching { unbindService(serviceConnection) }
+            isServiceBound = false
         }
         super.onDestroy()
     }

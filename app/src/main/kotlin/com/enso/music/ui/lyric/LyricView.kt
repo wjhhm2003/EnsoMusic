@@ -31,6 +31,9 @@ class LyricView @JvmOverloads constructor(
 
     private var lyricData: LyricData = LyricData.EMPTY
     private val currentActiveIndices = HashSet<Int>()
+    // Reused per tick so the 30 fps karaoke loop does not allocate.
+    private val scratchActiveSet = HashSet<Int>()
+    private var lastPositionMs = 0L
     private var currentFocusIndex = -1
     private var isUserScrolling = false
     private var lastUserTouchTime = 0L
@@ -73,6 +76,7 @@ class LyricView @JvmOverloads constructor(
         this.lyricData = data
         this.currentFocusIndex = -1
         this.currentActiveIndices.clear()
+        this.lastPositionMs = 0L
         adapter.submitList(data.lines)
         if (data.lines.isNotEmpty()) {
             recyclerView.scrollToPosition(0)
@@ -116,7 +120,10 @@ class LyricView @JvmOverloads constructor(
             isUserScrolling = false
         }
 
-        val newActiveSet = HashSet(activeList)
+        lastPositionMs = currentPositionMs
+        val newActiveSet = scratchActiveSet
+        newActiveSet.clear()
+        for (i in activeList.indices) newActiveSet.add(activeList[i])
 
         // 1. Deactivate lines that have ended
         for (idx in currentActiveIndices) {
@@ -205,7 +212,9 @@ class LyricView @JvmOverloads constructor(
             val isActive = currentActiveIndices.contains(position)
             holder.lineView.showTranslation = showTranslation
             holder.lineView.showTransliteration = showTransliteration
-            holder.lineView.bind(line, isActive, 0L)
+            // Bind with the live position so a recycled active line keeps its
+            // karaoke fill instead of flashing back to empty.
+            holder.lineView.bind(line, isActive, lastPositionMs)
             holder.lineView.setOnClickListener {
                 onLineClickListener?.invoke(line.startTimeMs)
             }

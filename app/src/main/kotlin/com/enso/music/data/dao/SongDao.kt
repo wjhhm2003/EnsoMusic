@@ -79,6 +79,9 @@ interface SongDao {
     """)
     fun getAllArtists(): Flow<List<ArtistItem>>
 
+    @Query("SELECT * FROM songs WHERE path IN (:paths)")
+    fun getSongsByPaths(paths: List<String>): List<SongEntity>
+
     @Query("SELECT path, lastModified, size FROM songs")
     fun getAllSongSnapshots(): List<SongSnapshot>
 

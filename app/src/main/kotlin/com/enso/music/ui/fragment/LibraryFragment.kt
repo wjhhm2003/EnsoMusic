@@ -23,9 +23,16 @@ import com.enso.music.ui.MainActivity
 import com.enso.music.ui.adapter.AlbumAdapter
 import com.enso.music.ui.adapter.ArtistAdapter
 import com.enso.music.ui.adapter.SongAdapter
+import android.widget.Toast
+import com.enso.music.data.scanner.MetadataHelper
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class LibraryFragment : Fragment() {
 
@@ -40,7 +47,8 @@ class LibraryFragment : Fragment() {
     private lateinit var artistAdapter: ArtistAdapter
     private lateinit var detailSongAdapter: SongAdapter
 
-    private var currentDetailSongs = ArrayList<SongEntity>()
+    private var detailToken = 0
+    private var currentDetailIsAlbum = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -64,13 +72,8 @@ class LibraryFragment : Fragment() {
         val scope = viewLifecycleOwner.lifecycleScope
 
         // All Songs
-        songAdapter = SongAdapter(scope) { _, song ->
-            val list = songAdapter.currentList
-            val index = list.indexOfFirst { it.path == song.path }
-            if (index >= 0) {
-                (activity as? MainActivity)?.playbackService?.setQueue(list, index, true)
-                (activity as? MainActivity)?.navigateToPage(1)
-            }
+        songAdapter = SongAdapter(scope, onItemLongClick = ::playNext) { index, song ->
+            playFromList(songAdapter.currentList, index, song, seamless = false)
         }
 
         // Albums
@@ -84,14 +87,33 @@ class LibraryFragment : Fragment() {
         }
 
         // Drilldown Songs
-        detailSongAdapter = SongAdapter(scope) { _, song ->
-            val list = detailSongAdapter.currentList
-            val index = list.indexOfFirst { it.path == song.path }
-            if (index >= 0) {
-                (activity as? MainActivity)?.playbackService?.setQueue(list, index, true)
-                (activity as? MainActivity)?.navigateToPage(1)
-            }
+        detailSongAdapter = SongAdapter(scope, onItemLongClick = ::playNext) { index, song ->
+            // Album tracks started from the album page play gaplessly.
+            playFromList(detailSongAdapter.currentList, index, song, seamless = currentDetailIsAlbum)
         }
+    }
+
+    private fun playFromList(list: List<SongEntity>, clickedIndex: Int, song: SongEntity, seamless: Boolean) {
+        val main = activity as? MainActivity ?: return
+        val service = main.playbackService ?: return
+        val index = if (list.getOrNull(clickedIndex)?.path == song.path) clickedIndex
+        else list.indexOfFirst { it.path == song.path }
+        if (index < 0) return
+        val current = service.playbackInfo.value
+        if (current.currentSong?.path == song.path && service.currentQueue.value == list) {
+            // Tapping the song that is already loaded from this same list just
+            // opens the player instead of restarting it.
+            if (!current.isPlaying) service.resume()
+        } else {
+            service.setQueue(list, index, startPlay = true, enableSeamlessPlayback = seamless)
+        }
+        main.navigateToPage(1)
+    }
+
+    private fun playNext(song: SongEntity) {
+        val service = (activity as? MainActivity)?.playbackService ?: return
+        service.playNext(song)
+        Toast.makeText(requireContext(), getString(R.string.queue_added_next, song.title), Toast.LENGTH_SHORT).show()
     }
 
     private fun setupViews() {
@@ -122,14 +144,18 @@ class LibraryFragment : Fragment() {
             (activity as? MainActivity)?.navigateToPage(2)
         }
 
-        binding.btnDetailBack.setOnClickListener {
-            binding.layoutDetail.visibility = View.GONE
-        }
+        binding.btnDetailBack.setOnClickListener { hideDetail() }
 
         binding.btnDetailPlayAll.setOnClickListener {
             val list = detailSongAdapter.currentList
             if (list.isNotEmpty()) {
-                (activity as? MainActivity)?.playbackService?.setQueue(list, 0, true)
+                // Album-level Play All opts into low-overhead gapless playback.
+                (activity as? MainActivity)?.playbackService?.setQueue(
+                    list,
+                    startIndex = 0,
+                    startPlay = true,
+                    enableSeamlessPlayback = currentDetailIsAlbum
+                )
                 (activity as? MainActivity)?.navigateToPage(1)
             }
         }
@@ -240,30 +266,52 @@ class LibraryFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
                     songDao.getAllSongs().collect { songs ->
-                        songAdapter.submitList(songs)
-                        updateListVisibility()
+                        songAdapter.submitList(songs) { updateListVisibility() }
                     }
                 }
                 launch {
-                    songDao.getAllAlbums().collect { albums ->
-                        val sortedAlbums = albums.map { item ->
-                            val initial = PinyinInitialHelper.getInitial(item.album)
-                            val key = PinyinInitialHelper.getSortKey(item.album)
-                            item.withSort(key, initial)
-                        }.sortedWith(compareBy({ it.sortInitial == "#" }, { it.sortKey }))
-                        albumAdapter.submitList(sortedAlbums)
-                        updateListVisibility()
-                    }
+                    songDao.getAllAlbums()
+                        .map { albums ->
+                            albums.map { item ->
+                                item.withSort(
+                                    PinyinInitialHelper.getSortKey(item.album),
+                                    PinyinInitialHelper.getInitial(item.album)
+                                )
+                            }.sortedWith(compareBy({ it.sortInitial == "#" }, { it.sortKey }))
+                        }
+                        .flowOn(Dispatchers.Default)
+                        .collect { sortedAlbums ->
+                            albumAdapter.submitList(sortedAlbums)
+                            updateListVisibility()
+                        }
                 }
                 launch {
-                    songDao.getAllArtists().collect { artists ->
-                        val sortedArtists = artists.map { item ->
-                            val initial = PinyinInitialHelper.getInitial(item.artist)
-                            val key = PinyinInitialHelper.getSortKey(item.artist)
-                            item.withSort(key, initial)
-                        }.sortedWith(compareBy({ it.sortInitial == "#" }, { it.sortKey }))
-                        artistAdapter.submitList(sortedArtists)
-                        updateListVisibility()
+                    songDao.getAllArtists()
+                        .map { artists ->
+                            artists.map { item ->
+                                item.withSort(
+                                    PinyinInitialHelper.getSortKey(item.artist),
+                                    PinyinInitialHelper.getInitial(item.artist)
+                                )
+                            }.sortedWith(compareBy({ it.sortInitial == "#" }, { it.sortKey }))
+                        }
+                        .flowOn(Dispatchers.Default)
+                        .collect { sortedArtists ->
+                            artistAdapter.submitList(sortedArtists)
+                            updateListVisibility()
+                        }
+                }
+                launch {
+                    (activity as? MainActivity)?.serviceConnectedFlow?.collectLatest { connected ->
+                        val service = (activity as? MainActivity)?.playbackService
+                        if (!connected || service == null) return@collectLatest
+                        service.playbackInfo
+                            .map { it.currentSong?.path }
+                            .distinctUntilChanged()
+                            .collect { path ->
+                                songAdapter.setPlayingPath(path)
+                                detailSongAdapter.setPlayingPath(path)
+                            }
                     }
                 }
             }
@@ -271,60 +319,71 @@ class LibraryFragment : Fragment() {
     }
 
     private fun openAlbumDetail(album: AlbumItem) {
-        binding.tvDetailTitle.text = album.album
-        binding.layoutDetail.visibility = View.VISIBLE
+        currentDetailIsAlbum = true
+        showDetail(album.album)
+        val appContext = requireContext().applicationContext
+        val token = ++detailToken
 
-        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-            val songDao = AppDatabase.getInstance(requireContext()).songDao()
-            val songs = songDao.getSongsByAlbumList(album.album)
+        viewLifecycleOwner.lifecycleScope.launch {
+            val songDao = AppDatabase.getInstance(appContext).songDao()
+            val songs = withContext(Dispatchers.IO) { songDao.getSongsByAlbumList(album.album) }
+            if (token != detailToken || _binding == null) return@launch
+            detailSongAdapter.submitList(songs)
 
-            // Auto-heal missing track numbers from metadata / filename if any
-            val metaHelper = com.enso.music.data.scanner.MetadataHelper(requireContext())
-            var hasUpdates = false
-            val resolvedSongs = songs.map { song ->
-                if (song.trackNumber <= 0) {
-                    val file = java.io.File(song.path)
-                    if (file.exists()) {
-                        val track = metaHelper.parseTrackNumberOnly(file)
-                        if (track > 0) {
-                            hasUpdates = true
-                            return@map song.copy(trackNumber = track)
-                        }
-                    }
+            // Self-heal missing track numbers from tags / file names, off the
+            // UI path, and only re-submit when something actually changed.
+            if (songs.none { it.trackNumber <= 0 }) return@launch
+            val healed = withContext(Dispatchers.IO) {
+                val metaHelper = MetadataHelper(appContext)
+                var changed = false
+                val resolved = songs.map { song ->
+                    if (song.trackNumber > 0) return@map song
+                    val file = File(song.path)
+                    val track = if (file.exists()) metaHelper.parseTrackNumberOnly(file) else 0
+                    if (track > 0) {
+                        changed = true
+                        song.copy(trackNumber = track)
+                    } else song
                 }
-                song
+                if (changed) {
+                    songDao.insertSongs(resolved.filter { r -> songs.any { it.path == r.path && it.trackNumber != r.trackNumber } })
+                    resolved.sortedWith(compareBy({ if (it.trackNumber <= 0) Int.MAX_VALUE else it.trackNumber }, { it.path }))
+                } else null
             }
-
-            if (hasUpdates) {
-                songDao.insertSongs(resolvedSongs)
-            }
-
-            // Strictly sort by album trackNumber ascending (1, 2, 3...), and fallback to filename/path
-            val sortedSongs = resolvedSongs.sortedWith(compareBy(
-                { if (it.trackNumber <= 0) 999999 else it.trackNumber },
-                { it.path }
-            ))
-
-            withContext(Dispatchers.Main) {
-                currentDetailSongs.clear()
-                currentDetailSongs.addAll(sortedSongs)
-                detailSongAdapter.submitList(sortedSongs)
+            if (healed != null && token == detailToken && _binding != null) {
+                detailSongAdapter.submitList(healed)
             }
         }
     }
 
     private fun openArtistDetail(artist: ArtistItem) {
-        binding.tvDetailTitle.text = artist.artist
-        binding.layoutDetail.visibility = View.VISIBLE
-
-        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-            val songs = AppDatabase.getInstance(requireContext()).songDao().getSongsByArtistList(artist.artist)
-            withContext(Dispatchers.Main) {
-                currentDetailSongs.clear()
-                currentDetailSongs.addAll(songs)
-                detailSongAdapter.submitList(songs)
+        currentDetailIsAlbum = false
+        showDetail(artist.artist)
+        val appContext = requireContext().applicationContext
+        val token = ++detailToken
+        viewLifecycleOwner.lifecycleScope.launch {
+            val songs = withContext(Dispatchers.IO) {
+                AppDatabase.getInstance(appContext).songDao().getSongsByArtistList(artist.artist)
             }
+            if (token == detailToken && _binding != null) detailSongAdapter.submitList(songs)
         }
+    }
+
+    private fun showDetail(title: String) {
+        binding.tvDetailTitle.text = title
+        detailSongAdapter.submitList(emptyList())
+        val detail = binding.layoutDetail
+        detail.animate().cancel()
+        detail.alpha = 0f
+        detail.translationX = detail.width * 0.15f
+        detail.visibility = View.VISIBLE
+        detail.animate().alpha(1f).translationX(0f).setDuration(180).start()
+    }
+
+    private fun hideDetail() {
+        detailToken++
+        binding.layoutDetail.animate().cancel()
+        binding.layoutDetail.visibility = View.GONE
     }
 
     fun handleBackPressed(): Boolean {
@@ -334,7 +393,7 @@ class LibraryFragment : Fragment() {
             return true
         }
         if (binding.layoutDetail.visibility == View.VISIBLE) {
-            binding.layoutDetail.visibility = View.GONE
+            hideDetail()
             return true
         }
         return false

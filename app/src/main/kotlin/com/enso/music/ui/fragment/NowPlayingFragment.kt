@@ -1,30 +1,41 @@
 package com.enso.music.ui.fragment
 
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.SeekBar
+import android.widget.TextView
+import android.widget.Toast
+import androidx.core.graphics.ColorUtils
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import androidx.viewpager2.widget.ViewPager2
 import com.enso.music.R
 import com.enso.music.data.cover.CoverManager
 import com.enso.music.data.entity.SongEntity
+import com.enso.music.data.lyric.LyricManager
+import com.enso.music.data.lyric.model.LyricData
 import com.enso.music.databinding.FragmentNowPlayingBinding
 import com.enso.music.service.MusicPlaybackService
 import com.enso.music.service.PlayMode
+import com.enso.music.service.PlaybackInfo
+import com.enso.music.service.SleepTimerState
 import com.enso.music.ui.MainActivity
 import com.enso.music.ui.adapter.FormatUtils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class NowPlayingFragment : Fragment() {
 
@@ -34,13 +45,23 @@ class NowPlayingFragment : Fragment() {
     private var isUserTrackingSeekBar = false
     private var progressJob: Job? = null
     private var volumeAutoHideJob: Job? = null
+    private var sleepLabelJob: Job? = null
+    private var ambientJob: Job? = null
     private var isScreenOn = true
+
+    /** Path of the song whose cover/ambient are currently bound. */
+    private var boundSongPath: String? = null
+    private var boundCoverPath: String? = null
+    private var isCoverBound = false
+    private var lastShownError: String? = null
+    private var lastPlayMode: PlayMode? = null
+    private var lastIsPlaying: Boolean? = null
 
     // Lyric state
     var isLyricShowing: Boolean = false
         private set
     private var currentSongPath: String? = null
-    private var currentLyricData: com.enso.music.data.lyric.model.LyricData = com.enso.music.data.lyric.model.LyricData.EMPTY
+    private var currentLyricData: LyricData = LyricData.EMPTY
     private var lyricJob: Job? = null
     private var lyricSyncJob: Job? = null
     private var lyricLoadToken = 0L
@@ -56,162 +77,114 @@ class NowPlayingFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        // Crucial marquee fix: enable marquee continuous scrolling
         binding.tvTitle.isSelected = true
         setupControls()
         setupLyricControls()
         setupVolumeControls()
+        setupSleepTimer()
         observePlaybackState()
     }
 
-    private fun getService(): MusicPlaybackService? {
-        return (activity as? MainActivity)?.playbackService
-    }
+    private fun getService(): MusicPlaybackService? = (activity as? MainActivity)?.playbackService
 
-    private fun formatSubtitle(song: SongEntity?): String {
-        return if (song != null) {
-            "${song.artist} · ${song.album}"
-        } else {
-            "请在曲库选择歌曲"
-        }
-    }
+    private fun formatSubtitle(song: SongEntity?): String =
+        if (song != null) "${song.artist} · ${song.album}" else getString(R.string.now_playing_empty_hint)
+
+    // =========================================================================
+    // Controls
+    // =========================================================================
 
     private fun setupControls() {
         binding.btnPlayPause.setOnClickListener {
-            getService()?.togglePlayPause()
+            val service = getService() ?: return@setOnClickListener
+            if (service.playbackInfo.value.currentSong == null) {
+                (activity as? MainActivity)?.navigateToPage(0)
+                return@setOnClickListener
+            }
+            service.togglePlayPause()
         }
-
-        binding.btnPrevious.setOnClickListener {
-            getService()?.skipPrevious()
-        }
-
-        binding.btnNext.setOnClickListener {
-            getService()?.skipNext()
-        }
+        binding.btnPrevious.setOnClickListener { getService()?.skipPrevious() }
+        binding.btnNext.setOnClickListener { getService()?.skipNext() }
 
         binding.btnPlayMode.setOnClickListener {
-            val service = getService() ?: return@setOnClickListener
-            // Cycle sequence: LOOP_ALL (列表循环 🔁) -> LOOP_ONE (单曲循环 🔂) -> SHUFFLE (随机播放 🔀) -> LOOP_ALL
-            val targetMode = when (service.playbackInfo.value.playMode) {
-                PlayMode.LOOP_ALL -> PlayMode.LOOP_ONE
-                PlayMode.LOOP_ONE -> PlayMode.SHUFFLE
-                PlayMode.SHUFFLE -> PlayMode.LOOP_ALL
-                PlayMode.SEQUENTIAL -> PlayMode.LOOP_ALL
-            }
-            while (service.playbackInfo.value.playMode != targetMode) {
-                service.togglePlayMode()
-            }
+            val mode = getService()?.cyclePlayModeForButton() ?: return@setOnClickListener
+            Toast.makeText(requireContext(), mode.label, Toast.LENGTH_SHORT).show()
         }
 
-        binding.btnQueue.setOnClickListener {
-            val mainActivity = activity as? MainActivity
-            if (mainActivity != null) {
-                mainActivity.navigateToPage(2)
-            } else {
-                activity?.findViewById<ViewPager2>(R.id.viewPager)?.currentItem = 2
-            }
-        }
-
-        binding.btnLyricCapsule.setOnClickListener {
-            showLyricView()
-        }
-
-        binding.cardCover.setOnClickListener {
-            showLyricView()
-        }
+        binding.btnQueue.setOnClickListener { (activity as? MainActivity)?.navigateToPage(2) }
+        binding.btnLyricCapsule.setOnClickListener { showLyricView() }
+        binding.cardCover.setOnClickListener { showLyricView() }
 
         binding.sbProgress.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    val duration = getService()?.getDuration() ?: 0L
-                    if (duration > 0) {
-                        val targetMs = (progress / 1000f * duration).toLong()
-                        binding.tvArtistAlbum.text = "${FormatUtils.formatDuration(targetMs)} / ${FormatUtils.formatDuration(duration)}"
-                    }
-                }
+                if (fromUser) showSeekPreview(progress)
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) {
                 isUserTrackingSeekBar = true
-                val duration = getService()?.getDuration() ?: 0L
-                val progress = seekBar?.progress ?: 0
-                if (duration > 0) {
-                    val targetMs = (progress / 1000f * duration).toLong()
-                    binding.tvArtistAlbum.text = "${FormatUtils.formatDuration(targetMs)} / ${FormatUtils.formatDuration(duration)}"
-                }
+                binding.tvElapsed.setTextColor(resources.getColor(R.color.white, null))
+                showSeekPreview(seekBar?.progress ?: 0)
             }
 
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
                 val service = getService()
                 val duration = service?.getDuration() ?: 0L
-                val progress = seekBar?.progress ?: 0
-                if (duration > 0 && service != null) {
-                    val targetMs = (progress / 1000f * duration).toLong()
-                    service.seekTo(targetMs)
+                if (service != null && duration > 0) {
+                    service.seekTo((seekBar!!.progress / 1000f * duration).toLong())
                 }
                 isUserTrackingSeekBar = false
-                val currentSong = service?.playbackInfo?.value?.currentSong
-                binding.tvArtistAlbum.text = formatSubtitle(currentSong)
+                binding.tvElapsed.setTextColor(resources.getColor(R.color.text_secondary, null))
             }
         })
+    }
+
+    private fun showSeekPreview(progress: Int) {
+        val duration = getService()?.getDuration() ?: 0L
+        if (duration > 0) {
+            binding.tvElapsed.text = FormatUtils.formatDuration((progress / 1000f * duration).toLong())
+        }
     }
 
     private fun observePlaybackState() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 (activity as? MainActivity)?.serviceConnectedFlow?.collectLatest { connected ->
-                    if (connected) {
-                        val service = getService() ?: return@collectLatest
-                        coroutineScope {
-                            launch {
-                                service.playbackInfo.collect { info ->
-                                    updateUi(info)
-                                }
-                            }
-                            launch {
-                                service.fineVolumeFlow.collect { fineVol ->
-                                    binding.btnVolumeCapsule.text = "🔊 ${fineVol}%"
-                                    binding.tvVolumeTitle.text = "精细音量 ${fineVol}%"
-                                    if (binding.sbFineVolume.progress != fineVol) {
-                                        binding.sbFineVolume.progress = fineVol
-                                    }
-                                }
+                    if (!connected) return@collectLatest
+                    val service = getService() ?: return@collectLatest
+                    coroutineScope {
+                        launch { service.playbackInfo.collect { updateUi(it) } }
+                        launch {
+                            service.fineVolumeFlow.collect { fineVol ->
+                                binding.btnVolumeCapsule.text = getString(R.string.volume_capsule, fineVol)
+                                binding.tvVolumeTitle.text = getString(R.string.volume_title, fineVol)
+                                if (binding.sbFineVolume.progress != fineVol) binding.sbFineVolume.progress = fineVol
                             }
                         }
+                        launch { service.sleepTimer.collect { renderSleepTimer(it) } }
                     }
                 }
             }
         }
     }
 
+    // =========================================================================
+    // Volume overlay
+    // =========================================================================
+
     private fun setupVolumeControls() {
-        // Overlay triggers
-        binding.btnVolumeCapsule.setOnClickListener {
-            showVolumeOverlay()
-        }
+        binding.btnVolumeCapsule.setOnClickListener { showVolumeOverlay() }
+        binding.layoutVolumeOverlay.setOnClickListener { hideVolumeOverlay() }
+        binding.cardVolumePanel.setOnClickListener { resetVolumeAutoHide() }
 
-        // Tap backdrop to dismiss
-        binding.layoutVolumeOverlay.setOnClickListener {
-            hideVolumeOverlay()
-        }
-
-        binding.cardVolumePanel.setOnClickListener {
-            // Prevent dismissal when clicking inside the panel
-            resetVolumeAutoHide()
-        }
-
-        // Fine volume step buttons
         binding.btnVolMinus.setOnClickListener {
             getService()?.adjustFineVolume(-1)
             resetVolumeAutoHide()
         }
-
         binding.btnVolPlus.setOnClickListener {
             getService()?.adjustFineVolume(1)
             resetVolumeAutoHide()
         }
 
-        // Fine volume seekbar
         binding.sbFineVolume.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
@@ -224,19 +197,15 @@ class NowPlayingFragment : Fragment() {
                 volumeAutoHideJob?.cancel()
             }
 
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                resetVolumeAutoHide()
-            }
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = resetVolumeAutoHide()
         })
 
-        // System volume buttons
         binding.btnSysVolMinus.setOnClickListener {
             val service = getService() ?: return@setOnClickListener
             service.adjustSystemVolume(AudioManager.ADJUST_LOWER)
             updateSystemVolumeUi(service)
             resetVolumeAutoHide()
         }
-
         binding.btnSysVolPlus.setOnClickListener {
             val service = getService() ?: return@setOnClickListener
             service.adjustSystemVolume(AudioManager.ADJUST_RAISE)
@@ -246,27 +215,34 @@ class NowPlayingFragment : Fragment() {
     }
 
     fun showVolumeOverlay() {
+        if (_binding == null) return
         val service = getService() ?: return
         updateSystemVolumeUi(service)
         val currentVol = service.getFineVolume()
-        binding.btnVolumeCapsule.text = "🔊 ${currentVol}%"
-        binding.tvVolumeTitle.text = "精细音量 ${currentVol}%"
+        binding.btnVolumeCapsule.text = getString(R.string.volume_capsule, currentVol)
+        binding.tvVolumeTitle.text = getString(R.string.volume_title, currentVol)
         binding.sbFineVolume.progress = currentVol
 
-        binding.layoutVolumeOverlay.visibility = View.VISIBLE
-        binding.layoutVolumeOverlay.alpha = 1f
+        val overlay = binding.layoutVolumeOverlay
+        overlay.animate().cancel()
+        if (overlay.visibility != View.VISIBLE) {
+            overlay.alpha = 0f
+            overlay.visibility = View.VISIBLE
+        }
+        overlay.animate().alpha(1f).setDuration(120).start()
         resetVolumeAutoHide()
     }
 
     fun hideVolumeOverlay() {
+        if (_binding == null) return
         volumeAutoHideJob?.cancel()
         volumeAutoHideJob = null
-        binding.layoutVolumeOverlay.animate()
+        val overlay = binding.layoutVolumeOverlay
+        overlay.animate().cancel()
+        overlay.animate()
             .alpha(0f)
-            .setDuration(200)
-            .withEndAction {
-                binding.layoutVolumeOverlay.visibility = View.GONE
-            }
+            .setDuration(180)
+            .withEndAction { _binding?.layoutVolumeOverlay?.visibility = View.GONE }
             .start()
     }
 
@@ -278,41 +254,119 @@ class NowPlayingFragment : Fragment() {
         }
     }
 
-    private fun setupLyricControls() {
-        binding.btnLyricBack.setOnClickListener {
-            hideLyricView()
-        }
+    private fun updateSystemVolumeUi(service: MusicPlaybackService) {
+        binding.tvSystemVolumeText.text =
+            getString(R.string.system_volume_steps, service.getSystemVolume(), service.getMaxSystemVolume())
+    }
 
-        binding.btnLyricRefresh.setOnClickListener {
-            val song = getService()?.playbackInfo?.value?.currentSong
-            if (song != null) {
-                loadLyricsForSong(song, forceRefresh = true)
+    // =========================================================================
+    // Sleep timer
+    // =========================================================================
+
+    private fun setupSleepTimer() {
+        binding.btnSleepTimer.setOnClickListener { showSleepOverlay() }
+        binding.layoutSleepOverlay.setOnClickListener { hideSleepOverlay() }
+        binding.cardSleepPanel.setOnClickListener { /* swallow */ }
+
+        val grid = binding.gridSleepOptions
+        for (i in 0 until grid.childCount) {
+            val chip = grid.getChildAt(i) as? TextView ?: continue
+            chip.setOnClickListener {
+                val service = getService() ?: return@setOnClickListener
+                val tag = chip.tag as? String
+                if (tag == "end") {
+                    service.setStopAfterCurrent()
+                    Toast.makeText(requireContext(), R.string.sleep_after_current_set, Toast.LENGTH_SHORT).show()
+                } else {
+                    val minutes = tag?.toIntOrNull() ?: return@setOnClickListener
+                    service.setSleepTimer(minutes)
+                    Toast.makeText(requireContext(), getString(R.string.sleep_set, minutes), Toast.LENGTH_SHORT).show()
+                }
+                hideSleepOverlay()
             }
         }
-
-        binding.btnLyricDisplayMode.setOnClickListener {
-            val modeLabel = binding.lyricView.cycleDisplayMode()
-            binding.btnLyricDisplayMode.text = modeLabel
-        }
-
-        binding.lyricView.onLineClickListener = { targetMs ->
-            getService()?.seekTo(targetMs)
+        binding.btnSleepCancel.setOnClickListener {
+            getService()?.cancelSleepTimer()
+            hideSleepOverlay()
         }
     }
 
+    private fun showSleepOverlay() {
+        binding.layoutSleepOverlay.alpha = 0f
+        binding.layoutSleepOverlay.visibility = View.VISIBLE
+        binding.layoutSleepOverlay.animate().alpha(1f).setDuration(150).start()
+        binding.btnSleepCancel.visibility =
+            if (getService()?.sleepTimer?.value?.isActive == true) View.VISIBLE else View.GONE
+    }
+
+    private fun hideSleepOverlay() {
+        binding.layoutSleepOverlay.animate().cancel()
+        binding.layoutSleepOverlay.visibility = View.GONE
+    }
+
+    private fun renderSleepTimer(state: SleepTimerState) {
+        sleepLabelJob?.cancel()
+        val badge = binding.btnSleepTimer
+        when {
+            state.stopAfterCurrent -> {
+                badge.text = getString(R.string.sleep_badge_after_current)
+                badge.setTextColor(resources.getColor(R.color.accent_green_highlight, null))
+            }
+            state.endAtElapsedMs > 0 -> {
+                badge.setTextColor(resources.getColor(R.color.accent_green_highlight, null))
+                sleepLabelJob = viewLifecycleOwner.lifecycleScope.launch {
+                    while (isActive) {
+                        val remainingMs = state.endAtElapsedMs - SystemClock.elapsedRealtime()
+                        val minutes = ((remainingMs + 59_999) / 60_000).coerceAtLeast(0)
+                        badge.text = getString(R.string.sleep_badge_minutes, minutes)
+                        if (remainingMs <= 0) break
+                        // Update at the next minute boundary only.
+                        delay(((remainingMs - 1) % 60_000) + 1)
+                    }
+                }
+            }
+            else -> {
+                badge.text = getString(R.string.sleep_badge_off)
+                badge.setTextColor(resources.getColor(R.color.white, null))
+            }
+        }
+    }
+
+    // =========================================================================
+    // Lyrics
+    // =========================================================================
+
+    private fun setupLyricControls() {
+        binding.btnLyricBack.setOnClickListener { hideLyricView() }
+        binding.btnLyricRefresh.setOnClickListener {
+            val song = getService()?.playbackInfo?.value?.currentSong ?: return@setOnClickListener
+            Toast.makeText(requireContext(), R.string.lyric_searching, Toast.LENGTH_SHORT).show()
+            loadLyricsForSong(song, forceRefresh = true)
+        }
+        binding.btnLyricDisplayMode.setOnClickListener {
+            binding.btnLyricDisplayMode.text = binding.lyricView.cycleDisplayMode()
+        }
+        binding.lyricView.onLineClickListener = { targetMs -> getService()?.seekTo(targetMs) }
+    }
+
     fun showLyricView() {
+        if (_binding == null) return
         isLyricShowing = true
-        binding.layoutLyricOverlay.visibility = View.VISIBLE
-        binding.layoutLyricOverlay.alpha = 1f
+        val overlay = binding.layoutLyricOverlay
+        overlay.alpha = 0f
+        overlay.visibility = View.VISIBLE
+        overlay.animate().alpha(1f).setDuration(160).start()
         binding.tvLyricSongTitle.isSelected = true
         val song = getService()?.playbackInfo?.value?.currentSong
         if (song != null) {
             binding.tvLyricSongTitle.text = song.title
             if (currentSongPath != song.path || currentLyricData.isEmpty()) {
                 loadLyricsForSong(song, forceRefresh = false)
+            } else {
+                binding.lyricView.updatePlaybackProgress(getService()?.getPosition() ?: 0L)
             }
         } else {
-            binding.tvLyricSongTitle.text = "暂无播放"
+            binding.tvLyricSongTitle.text = getString(R.string.nothing_playing)
             showLyricEmptyState(true)
         }
         startLyricSyncIfNeeded()
@@ -320,6 +374,10 @@ class NowPlayingFragment : Fragment() {
 
     fun handleBackPressed(): Boolean {
         if (_binding == null) return false
+        if (binding.layoutSleepOverlay.visibility == View.VISIBLE) {
+            hideSleepOverlay()
+            return true
+        }
         if (binding.layoutVolumeOverlay.visibility == View.VISIBLE) {
             hideVolumeOverlay()
             return true
@@ -332,52 +390,56 @@ class NowPlayingFragment : Fragment() {
     }
 
     fun hideLyricView(): Boolean {
-        if (isLyricShowing) {
-            isLyricShowing = false
-            stopLyricSync()
-            binding.layoutLyricOverlay.visibility = View.GONE
-            return true
-        }
-        return false
+        if (!isLyricShowing) return false
+        isLyricShowing = false
+        stopLyricSync()
+        binding.layoutLyricOverlay.animate().cancel()
+        binding.layoutLyricOverlay.visibility = View.GONE
+        return true
     }
 
     private fun loadLyricsForSong(song: SongEntity, forceRefresh: Boolean) {
         lyricJob?.cancel()
         val loadToken = ++lyricLoadToken
+        val keepCurrent = forceRefresh && currentSongPath == song.path && !currentLyricData.isEmpty()
         currentSongPath = song.path
-        currentLyricData = com.enso.music.data.lyric.model.LyricData.EMPTY
-        showLyricEmptyState(true)
+        if (!keepCurrent) {
+            currentLyricData = LyricData.EMPTY
+            showLyricLoadingState()
+        }
         binding.tvLyricSongTitle.text = song.title
         binding.tvLyricSongTitle.isSelected = true
 
-        lyricJob = com.enso.music.data.lyric.LyricManager.getInstance(requireContext()).loadLyric(
+        lyricJob = LyricManager.getInstance(requireContext()).loadLyric(
             song = song,
             forceOnlineRefresh = forceRefresh
         ) { lyricData ->
-            // A cancelled network request can still finish on the main
-            // dispatcher. Ignore results for an older song/reload or a view
-            // that has already left the STARTED state.
-            if (!isAdded || _binding == null || loadToken != lyricLoadToken ||
-                currentSongPath != song.path ||
-                !viewLifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-            ) return@loadLyric
+            // A cancelled request can still complete on Main; drop stale results.
+            if (!isAdded || _binding == null || loadToken != lyricLoadToken || currentSongPath != song.path) {
+                return@loadLyric
+            }
+            if (lyricData.isEmpty() && !currentLyricData.isEmpty()) return@loadLyric
             currentLyricData = lyricData
             if (lyricData.isEmpty()) {
                 showLyricEmptyState(true)
             } else {
                 showLyricEmptyState(false)
                 binding.lyricView.setLyricData(lyricData)
-                val pos = getService()?.getPosition() ?: 0L
-                binding.lyricView.updatePlaybackProgress(pos)
+                binding.lyricView.updatePlaybackProgress(getService()?.getPosition() ?: 0L)
             }
-            if (isLyricShowing) {
-                startLyricSyncIfNeeded()
-            }
+            if (isLyricShowing) startLyricSyncIfNeeded()
         }
+    }
+
+    private fun showLyricLoadingState() {
+        binding.tvLyricEmpty.text = getString(R.string.lyric_loading)
+        binding.tvLyricEmpty.visibility = View.VISIBLE
+        binding.lyricView.visibility = View.GONE
     }
 
     private fun showLyricEmptyState(isEmpty: Boolean) {
         if (isEmpty) {
+            binding.tvLyricEmpty.text = getString(R.string.lyric_empty)
             binding.tvLyricEmpty.visibility = View.VISIBLE
             binding.lyricView.visibility = View.GONE
         } else {
@@ -388,18 +450,15 @@ class NowPlayingFragment : Fragment() {
 
     private fun startLyricSyncIfNeeded() {
         stopLyricSync()
-        if (!isLyricShowing || !isScreenOn || !isResumed || getService()?.isPlaying() != true) {
-            return
-        }
-        val hasWords = currentLyricData.hasWordTiming
-        val syncDelayMs = if (hasWords) 33L else 300L // 30fps for word-level karaoke, 300ms for line sync
-
+        if (!isLyricShowing || !isScreenOn || !isResumed || getService()?.isPlaying() != true) return
+        if (currentLyricData.isEmpty()) return
+        // 30 fps for word-level karaoke, ~3 Hz for line-level sync.
+        val syncDelayMs = if (currentLyricData.hasWordTiming) 33L else 300L
         lyricSyncJob = viewLifecycleOwner.lifecycleScope.launch {
             while (isActive) {
                 val service = getService()
                 if (service != null && service.isPlaying()) {
-                    val pos = service.getPosition()
-                    binding.lyricView.updatePlaybackProgress(pos)
+                    binding.lyricView.updatePlaybackProgress(service.getPosition())
                 }
                 delay(syncDelayMs)
             }
@@ -411,100 +470,167 @@ class NowPlayingFragment : Fragment() {
         lyricSyncJob = null
     }
 
-    private fun updateSystemVolumeUi(service: MusicPlaybackService) {
-        val cur = service.getSystemVolume()
-        val max = service.getMaxSystemVolume()
-        binding.tvSystemVolumeText.text = "$cur / $max 格"
-    }
+    // =========================================================================
+    // Rendering
+    // =========================================================================
 
-    private fun updateUi(info: com.enso.music.service.PlaybackInfo) {
+    private fun updateUi(info: PlaybackInfo) {
         val song = info.currentSong
         if (song != null) {
-            binding.tvTitle.text = song.title
-            binding.tvTitle.isSelected = true
-            if (!isUserTrackingSeekBar) {
-                binding.tvArtistAlbum.text = formatSubtitle(song)
+            if (binding.tvTitle.text != song.title) {
+                binding.tvTitle.text = song.title
+                binding.tvTitle.isSelected = true
             }
+            binding.tvArtistAlbum.text = formatSubtitle(song)
 
-            if (currentSongPath != song.path) {
-                loadLyricsForSong(song, forceRefresh = false)
+            if (boundSongPath != song.path) {
+                boundSongPath = song.path
+                if (isLyricShowing) {
+                    loadLyricsForSong(song, forceRefresh = false)
+                } else {
+                    // Lyrics load lazily when the lyric page opens.
+                    lyricJob?.cancel()
+                    lyricLoadToken++
+                    currentSongPath = null
+                    currentLyricData = LyricData.EMPTY
+                }
+                binding.tvLyricSongTitle.text = song.title
             }
-
-            CoverManager.getInstance(requireContext()).loadInto(
-                binding.ivCover,
-                song.coverPath,
-                R.drawable.ic_music_note_24,
-                viewLifecycleOwner.lifecycleScope
-            )
+            if (!isCoverBound || boundCoverPath != song.coverPath) {
+                bindCover(song.coverPath)
+            }
         } else {
-            binding.tvTitle.text = "暂无播放"
-            binding.tvTitle.isSelected = true
-            binding.tvLyricSongTitle.text = "暂无播放"
+            boundSongPath = null
+            binding.tvTitle.text = getString(R.string.nothing_playing)
+            binding.tvLyricSongTitle.text = getString(R.string.nothing_playing)
+            binding.tvArtistAlbum.text = getString(R.string.now_playing_empty_hint)
             currentSongPath = null
-            currentLyricData = com.enso.music.data.lyric.model.LyricData.EMPTY
+            currentLyricData = LyricData.EMPTY
             showLyricEmptyState(true)
-            if (!isUserTrackingSeekBar) {
-                binding.tvArtistAlbum.text = "请在曲库选择歌曲"
-            }
-            binding.ivCover.setImageResource(R.drawable.ic_music_note_24)
+            if (!isCoverBound || boundCoverPath != null) bindCover(null)
         }
 
-        // Play / Pause button
-        if (info.isPlaying) {
-            binding.btnPlayPause.setImageResource(R.drawable.ic_pause_24)
+        val playing = info.isPlaying
+        binding.pbBuffering.visibility = if (info.isPreparing && playing) View.VISIBLE else View.GONE
+        if (lastIsPlaying != playing) {
+            lastIsPlaying = playing
+            binding.btnPlayPause.setImageResource(if (playing) R.drawable.ic_pause_24 else R.drawable.ic_play_24)
+            binding.btnPlayPause.contentDescription = getString(if (playing) R.string.action_pause else R.string.action_play)
+            binding.cardCover.animate().cancel()
+            binding.cardCover.animate()
+                .scaleX(if (playing) 1f else 0.94f)
+                .scaleY(if (playing) 1f else 0.94f)
+                .setDuration(220)
+                .start()
+        }
+        if (playing) {
             startProgressPolling()
-            if (isLyricShowing) {
-                startLyricSyncIfNeeded()
-            }
+            if (isLyricShowing) startLyricSyncIfNeeded()
         } else {
-            binding.btnPlayPause.setImageResource(R.drawable.ic_play_24)
             stopProgressPolling()
             stopLyricSync()
         }
 
-        // Mode icon
-        when (info.playMode) {
-            PlayMode.LOOP_ALL -> {
-                binding.btnPlayMode.setImageResource(R.drawable.ic_repeat_all_24)
-                binding.btnPlayMode.contentDescription = "列表循环"
+        if (lastPlayMode != info.playMode) {
+            lastPlayMode = info.playMode
+            val icon = when (info.playMode) {
+                PlayMode.LOOP_ALL -> R.drawable.ic_repeat_all_24
+                PlayMode.LOOP_ONE -> R.drawable.ic_repeat_one_24
+                PlayMode.SHUFFLE -> R.drawable.ic_shuffle_24
+                PlayMode.SEQUENTIAL -> R.drawable.ic_repeat_off_24
             }
-            PlayMode.LOOP_ONE -> {
-                binding.btnPlayMode.setImageResource(R.drawable.ic_repeat_one_24)
-                binding.btnPlayMode.contentDescription = "单曲循环"
-            }
-            PlayMode.SHUFFLE -> {
-                binding.btnPlayMode.setImageResource(R.drawable.ic_shuffle_24)
-                binding.btnPlayMode.contentDescription = "随机播放"
-            }
-            PlayMode.SEQUENTIAL -> {
-                binding.btnPlayMode.setImageResource(R.drawable.ic_repeat_off_24)
-                binding.btnPlayMode.contentDescription = "顺序播放"
-            }
+            binding.btnPlayMode.setImageResource(icon)
+            binding.btnPlayMode.contentDescription = info.playMode.label
         }
 
-        // Single instant update of progress if not tracking
-        if (!isUserTrackingSeekBar) {
-            updateProgressBar(info.positionMs, info.durationMs)
+        val error = info.errorMessage
+        if (error != null && error != lastShownError) {
+            Toast.makeText(requireContext(), error, Toast.LENGTH_SHORT).show()
         }
+        lastShownError = error
+
+        if (!isUserTrackingSeekBar) updateProgressBar(info.positionMs, info.durationMs)
+    }
+
+    private fun bindCover(coverPath: String?) {
+        boundCoverPath = coverPath
+        isCoverBound = true
+        val context = context ?: return
+        CoverManager.getInstance(context).loadInto(
+            binding.ivCover,
+            coverPath,
+            R.drawable.ic_music_note_24,
+            viewLifecycleOwner.lifecycleScope
+        )
+        updateAmbient(coverPath)
+    }
+
+    /** Tints the page with a visible, dark gradient derived from the cover. */
+    private fun updateAmbient(coverPath: String?) {
+        ambientJob?.cancel()
+        val ambient = binding.viewAmbient
+        if (coverPath.isNullOrBlank()) {
+            ambient.animate().alpha(0f).setDuration(300).start()
+            return
+        }
+        val appContext = requireContext().applicationContext
+        ambientJob = viewLifecycleOwner.lifecycleScope.launch {
+            val coverManager = CoverManager.getInstance(appContext)
+            // Cover extraction and playback-state delivery can finish in either
+            // order. Retry once so the background is not permanently left black
+            // when the cover file is still being written into the cache.
+            var color = withContext(Dispatchers.IO) {
+                coverManager.getDominantColor(coverPath)
+            }
+            if (color == null) {
+                delay(120L)
+                color = withContext(Dispatchers.IO) {
+                    coverManager.getDominantColor(coverPath)
+                }
+            }
+            if (_binding == null || boundCoverPath != coverPath) return@launch
+
+            // Keep the feature visible even for legacy songs whose cover path is
+            // readable by the ImageView but cannot be sampled for a dominant hue.
+            val resolvedColor = color ?: Color.rgb(92, 42, 76)
+            ambient.background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(
+                    ambientTint(resolvedColor, 0.58f),
+                    ambientTint(resolvedColor, 0.30f),
+                    Color.BLACK
+                )
+            )
+            ambient.animate().alpha(1f).setDuration(450).start()
+        }
+    }
+
+    /** Keeps the cover hue visible while preserving contrast for white text. */
+    private fun ambientTint(color: Int, lightness: Float): Int {
+        val hsl = FloatArray(3)
+        ColorUtils.colorToHSL(color, hsl)
+        hsl[1] = (hsl[1] * 0.88f).coerceIn(0.32f, 0.78f)
+        hsl[2] = (hsl[2].coerceAtMost(lightness) * 0.82f).coerceIn(0.12f, 0.48f)
+        return ColorUtils.HSLToColor(hsl)
     }
 
     private fun updateProgressBar(posMs: Long, durMs: Long) {
-        if (durMs > 0) {
-            val progress = ((posMs.toFloat() / durMs) * 1000).toInt().coerceIn(0, 1000)
-            binding.sbProgress.progress = progress
-        } else {
-            binding.sbProgress.progress = 0
-        }
+        binding.sbProgress.progress =
+            if (durMs > 0) ((posMs.toFloat() / durMs) * 1000).toInt().coerceIn(0, 1000) else 0
+        binding.tvElapsed.text = FormatUtils.formatDuration(posMs)
+        binding.tvDuration.text = FormatUtils.formatDuration(durMs)
     }
 
-    // Zero UI overhead when screen is off or paused
+    // =========================================================================
+    // Power: tick only while visible, playing and the screen is on.
+    // =========================================================================
+
     fun onScreenStateChanged(screenOn: Boolean) {
         isScreenOn = screenOn
+        if (_binding == null) return
         if (isScreenOn && isResumed && getService()?.isPlaying() == true) {
             startProgressPolling()
-            if (isLyricShowing) {
-                startLyricSyncIfNeeded()
-            }
+            if (isLyricShowing) startLyricSyncIfNeeded()
         } else {
             stopProgressPolling()
             stopLyricSync()
@@ -516,12 +642,14 @@ class NowPlayingFragment : Fragment() {
         progressJob = viewLifecycleOwner.lifecycleScope.launch {
             while (isActive) {
                 val service = getService()
-                if (service != null && service.isPlaying() && !isUserTrackingSeekBar) {
+                if (service != null && !isUserTrackingSeekBar) {
                     val pos = service.getPosition()
-                    val dur = service.getDuration()
-                    updateProgressBar(pos, dur)
+                    updateProgressBar(pos, service.getDuration())
+                    // Align ticks with second boundaries so the clock never skips.
+                    delay(1000L - (pos % 1000L).coerceIn(0L, 999L) + 15L)
+                } else {
+                    delay(1000L)
                 }
-                delay(1000L) // 1 Hz tick for ultra-low battery consumption
             }
         }
     }
@@ -535,10 +663,16 @@ class NowPlayingFragment : Fragment() {
         super.onResume()
         binding.tvTitle.isSelected = true
         binding.tvLyricSongTitle.isSelected = true
-        if (isScreenOn && getService()?.isPlaying() == true) {
-            startProgressPolling()
-            if (isLyricShowing) {
-                startLyricSyncIfNeeded()
+        val service = getService()
+        if (service != null) {
+            // Render the latest snapshot immediately as well as through the flow.
+            // This closes the small startup race where the service connects before
+            // the fragment starts collecting, leaving the primary screen blank.
+            updateUi(service.playbackInfo.value)
+            updateProgressBar(service.getPosition(), service.getDuration())
+            if (isScreenOn && service.isPlaying()) {
+                startProgressPolling()
+                if (isLyricShowing) startLyricSyncIfNeeded()
             }
         }
     }
@@ -557,6 +691,13 @@ class NowPlayingFragment : Fragment() {
         lyricLoadToken++
         volumeAutoHideJob?.cancel()
         volumeAutoHideJob = null
+        sleepLabelJob?.cancel()
+        ambientJob?.cancel()
+        boundSongPath = null
+        boundCoverPath = null
+        isCoverBound = false
+        lastIsPlaying = null
+        lastPlayMode = null
         _binding = null
         super.onDestroyView()
     }

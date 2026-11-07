@@ -15,4 +15,28 @@
     <string name="unknown_album">未知专辑</string>
     <string name="permission_storage_needed">需要读取存储权限以播放本地音乐</string>
     <string name="grant_permission">授权权限</string>
+    <string name="nothing_playing">暂无播放</string>
+    <string name="now_playing_empty_hint">请在曲库选择歌曲</string>
+    <string name="action_play">播放</string>
+    <string name="action_pause">暂停</string>
+    <string name="action_play_next">下一首播放</string>
+    <string name="action_remove_from_queue">从队列移除</string>
+    <string name="volume_capsule">🔊 %1$d%%</string>
+    <string name="volume_title">精细音量 %1$d%%</string>
+    <string name="system_volume_steps">%1$d / %2$d 格</string>
+    <string name="sleep_badge_off">☾</string>
+    <string name="sleep_badge_minutes">%1$d′</string>
+    <string name="sleep_badge_after_current">☾1</string>
+    <string name="sleep_set">%1$d 分钟后暂停</string>
+    <string name="sleep_after_current_set">本曲播完后暂停</string>
+    <string name="lyric_loading">正在加载歌词…</string>
+    <string name="lyric_empty">暂无歌词
+轻触右上角可重新在线检索</string>
+    <string name="lyric_searching">正在在线检索歌词…</string>
+    <string name="queue_count">共 %1$d 首</string>
+    <string name="queue_added_next">已添加为下一首：%1$s</string>
+    <string name="queue_removed">已移除：%1$s</string>
+    <string name="scan_progress">扫描中：%1$s（%2$d）</string>
+    <string name="scan_done">完成：共 %1$d 首（新增/更新 %2$d，移除 %3$d）</string>
+    <string name="scan_error">提示：%1$s</string>
 </resources>

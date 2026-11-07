@@ -35,6 +35,7 @@ object FormatUtils {
 // 1. Song Adapter
 class SongAdapter(
     private val scope: CoroutineScope,
+    private val onItemLongClick: ((song: SongEntity) -> Unit)? = null,
     private val onItemClick: (index: Int, song: SongEntity) -> Unit
 ) : ListAdapter<SongEntity, SongAdapter.SongViewHolder>(DiffCallback) {
 
@@ -44,10 +45,10 @@ class SongAdapter(
         if (playingPath != path) {
             val oldPath = playingPath
             playingPath = path
-            val oldIndex = currentList.indexOfFirst { it.path == oldPath }
-            val newIndex = currentList.indexOfFirst { it.path == path }
-            if (oldIndex != -1) notifyItemChanged(oldIndex)
-            if (newIndex != -1) notifyItemChanged(newIndex)
+            val oldIndex = if (oldPath == null) -1 else currentList.indexOfFirst { it.path == oldPath }
+            val newIndex = if (path == null) -1 else currentList.indexOfFirst { it.path == path }
+            if (oldIndex != -1) notifyItemChanged(oldIndex, PAYLOAD_PLAYING)
+            if (newIndex != -1) notifyItemChanged(newIndex, PAYLOAD_PLAYING)
         }
     }
 
@@ -62,20 +63,50 @@ class SongAdapter(
     }
 
     override fun onBindViewHolder(holder: SongViewHolder, position: Int) {
-        val item = getItem(position)
-        holder.bind(item, position)
+        holder.bind(getItem(position))
+    }
+
+    override fun onBindViewHolder(holder: SongViewHolder, position: Int, payloads: MutableList<Any>) {
+        if (payloads.isNotEmpty() && payloads.all { it == PAYLOAD_PLAYING }) {
+            holder.bindPlayingState(getItem(position))
+        } else {
+            super.onBindViewHolder(holder, position, payloads)
+        }
     }
 
     inner class SongViewHolder(private val binding: ItemSongBinding) :
         RecyclerView.ViewHolder(binding.root) {
 
-        fun bind(song: SongEntity, position: Int) {
-            val isNowPlaying = (playingPath != null && song.path == playingPath)
-            val accentGreen = ContextCompat.getColor(itemView.context, R.color.accent_green)
-            val white = ContextCompat.getColor(itemView.context, R.color.white)
+        private val accentGreen = ContextCompat.getColor(itemView.context, R.color.accent_green)
+        private val white = ContextCompat.getColor(itemView.context, R.color.white)
 
-            binding.tvTitle.text = song.title
+        init {
+            itemView.setOnClickListener {
+                val pos = bindingAdapterPosition
+                if (pos != RecyclerView.NO_POSITION && pos < currentList.size) {
+                    onItemClick(pos, currentList[pos])
+                }
+            }
+            if (onItemLongClick != null) {
+                itemView.setOnLongClickListener {
+                    val pos = bindingAdapterPosition
+                    if (pos != RecyclerView.NO_POSITION && pos < currentList.size) {
+                        onItemLongClick.invoke(currentList[pos])
+                        true
+                    } else false
+                }
+            }
+        }
+
+        fun bindPlayingState(song: SongEntity) {
+            val isNowPlaying = playingPath != null && song.path == playingPath
             binding.tvTitle.setTextColor(if (isNowPlaying) accentGreen else white)
+            binding.ivNowPlayingIndicator.visibility = if (isNowPlaying) View.VISIBLE else View.GONE
+        }
+
+        fun bind(song: SongEntity) {
+            binding.tvTitle.text = song.title
+            bindPlayingState(song)
 
             val subtitle = if (song.album.isBlank()) {
                 song.artist
@@ -84,7 +115,6 @@ class SongAdapter(
             }
             binding.tvSubtitle.text = subtitle
             binding.tvDuration.text = FormatUtils.formatDuration(song.duration)
-            binding.ivNowPlayingIndicator.visibility = if (isNowPlaying) View.VISIBLE else View.GONE
 
             CoverManager.getInstance(itemView.context).loadInto(
                 binding.ivCover,
@@ -92,14 +122,11 @@ class SongAdapter(
                 R.drawable.ic_music_note_24,
                 scope
             )
-
-            itemView.setOnClickListener {
-                val adapterPosition = bindingAdapterPosition
-                if (adapterPosition != RecyclerView.NO_POSITION && adapterPosition < currentList.size) {
-                    onItemClick(adapterPosition, currentList[adapterPosition])
-                }
-            }
         }
+    }
+
+    companion object {
+        private const val PAYLOAD_PLAYING = "playing"
     }
 
     object DiffCallback : DiffUtil.ItemCallback<SongEntity>() {
@@ -194,17 +221,28 @@ class ArtistAdapter(
 
 // 4. Queue Adapter
 class QueueAdapter(
+    private val onItemLongClick: ((index: Int, song: SongEntity) -> Unit)? = null,
     private val onItemClick: (index: Int) -> Unit
 ) : RecyclerView.Adapter<QueueAdapter.QueueViewHolder>() {
 
-    private val items = ArrayList<SongEntity>()
+    private var items: List<SongEntity> = emptyList()
     private var playingIndex = -1
 
     fun updateList(newItems: List<SongEntity>, currentPlayingIndex: Int) {
-        items.clear()
-        items.addAll(newItems)
+        val old = items
+        val oldPlaying = playingIndex
+        items = newItems
         playingIndex = currentPlayingIndex
-        notifyDataSetChanged()
+        if (old === newItems && oldPlaying == currentPlayingIndex) return
+        // Rows show their 1-based position, so a row whose index moved must
+        // rebind even when the song itself is unchanged.
+        DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+            override fun getOldListSize() = old.size
+            override fun getNewListSize() = newItems.size
+            override fun areItemsTheSame(o: Int, n: Int) = old[o].path == newItems[n].path
+            override fun areContentsTheSame(o: Int, n: Int) =
+                o == n && old[o] == newItems[n] && (o == oldPlaying) == (n == currentPlayingIndex)
+        }, false).dispatchUpdatesTo(this)
     }
 
     fun setPlayingIndex(index: Int) {
@@ -230,20 +268,29 @@ class QueueAdapter(
     inner class QueueViewHolder(private val binding: ItemQueueBinding) :
         RecyclerView.ViewHolder(binding.root) {
 
-        fun bind(song: SongEntity, position: Int) {
-            val isNowPlaying = (position == playingIndex)
+        private val accentGreen = ContextCompat.getColor(itemView.context, R.color.accent_green)
+        private val white = ContextCompat.getColor(itemView.context, R.color.white)
 
-            binding.tvQueueTitle.text = song.title
-            val subtitle = if (song.album.isBlank()) {
-                song.artist
-            } else {
-                "${song.artist} · ${song.album}"
+        init {
+            itemView.setOnClickListener {
+                val pos = bindingAdapterPosition
+                if (pos != RecyclerView.NO_POSITION && pos < items.size) onItemClick(pos)
             }
-            binding.tvQueueArtist.text = subtitle
+            if (onItemLongClick != null) {
+                itemView.setOnLongClickListener {
+                    val pos = bindingAdapterPosition
+                    if (pos != RecyclerView.NO_POSITION && pos < items.size) {
+                        onItemLongClick.invoke(pos, items[pos])
+                        true
+                    } else false
+                }
+            }
+        }
 
-            val accentGreen = ContextCompat.getColor(itemView.context, R.color.accent_green)
-            val white = ContextCompat.getColor(itemView.context, R.color.white)
-
+        fun bind(song: SongEntity, position: Int) {
+            val isNowPlaying = position == playingIndex
+            binding.tvQueueTitle.text = song.title
+            binding.tvQueueArtist.text = if (song.album.isBlank()) song.artist else "${song.artist} · ${song.album}"
             if (isNowPlaying) {
                 binding.tvQueueIndex.visibility = View.GONE
                 binding.ivNowPlayingIndicator.visibility = View.VISIBLE
@@ -253,13 +300,6 @@ class QueueAdapter(
                 binding.ivNowPlayingIndicator.visibility = View.GONE
                 binding.tvQueueIndex.text = (position + 1).toString()
                 binding.tvQueueTitle.setTextColor(white)
-            }
-
-            itemView.setOnClickListener {
-                val adapterPosition = bindingAdapterPosition
-                if (adapterPosition != RecyclerView.NO_POSITION && adapterPosition < items.size) {
-                    onItemClick(adapterPosition)
-                }
             }
         }
     }

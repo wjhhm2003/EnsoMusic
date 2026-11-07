@@ -64,11 +64,11 @@ class LayoutIntegrityChallengerTest {
         assertEquals("Root paddingTop must be 6dp", 6, parseDp(root.getAttribute("android:paddingTop")))
         assertEquals("Root paddingBottom must be 12dp", 12, parseDp(root.getAttribute("android:paddingBottom")))
 
-        // 1. Cover Card - percentage height adaptive (~43%, max 154dp)
+        // 1. Cover Card - width-driven adaptive square (~43%, max 176dp)
         val cardCover = findElementById(root, "cardCover")!!
         assertEquals("Cover dimension ratio must be 1:1", "1:1", cardCover.getAttribute("app:layout_constraintDimensionRatio"))
-        assertEquals("Cover max height must be 154dp", 154, parseDp(cardCover.getAttribute("app:layout_constraintHeight_max")))
-        assertEquals("Cover percent height must be 0.43", "0.43", cardCover.getAttribute("app:layout_constraintHeight_percent"))
+        assertEquals("Cover max width must be 176dp", 176, parseDp(cardCover.getAttribute("app:layout_constraintWidth_max")))
+        assertEquals("Cover percent width must be 0.43", "0.43", cardCover.getAttribute("app:layout_constraintWidth_percent"))
 
         // 2. Title & Subtitle Text
         val tvTitle = findElementById(root, "tvTitle")!!
@@ -119,12 +119,22 @@ class LayoutIntegrityChallengerTest {
         val gridAlphabet = findElementById(root, "gridAlphabet")!!
         val children = gridAlphabet.childNodes
 
+        // Weighted columns (0dp + columnWeight) share the grid width. Check the
+        // per-cell pitch on the target watch: 502px @ 226dpi ≈ 355dp wide.
+        val targetScreenWidthDp = 355
+        val columns = gridAlphabet.getAttribute("android:columnCount").toIntOrNull() ?: 1
+        val gridHorizontalMargin = parseDp(gridAlphabet.getAttribute("android:layout_marginStart")) +
+                parseDp(gridAlphabet.getAttribute("android:layout_marginEnd"))
+        val weightedPitchDp = (targetScreenWidthDp - gridHorizontalMargin) / columns
+
         var buttonCount = 0
         for (i in 0 until children.length) {
             val node = children.item(i)
             if (node.nodeType == Node.ELEMENT_NODE) {
                 val element = node as Element
-                val w = parseDp(element.getAttribute("android:layout_width"))
+                val isWeighted = element.getAttribute("android:layout_width") == "0dp" &&
+                        element.getAttribute("android:layout_columnWeight").isNotEmpty()
+                val w = if (isWeighted) weightedPitchDp else parseDp(element.getAttribute("android:layout_width"))
                 val h = parseDp(element.getAttribute("android:layout_height"))
                 assertTrue("Grid item '${element.textContent.trim()}' width ($w dp) must be >= 48dp", w >= 48)
                 assertTrue("Grid item '${element.textContent.trim()}' height ($h dp) must be >= 48dp", h >= 48)
