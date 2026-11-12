@@ -42,42 +42,20 @@ object EncodingUtils {
         if (input.isNullOrBlank()) return ""
         val trimmed = input.trim()
 
-        // If it already has CJK characters, it is most likely already correctly decoded
-        if (hasCjk(trimmed)) {
-            // Check for double-encoded UTF-8 inside Latin-1 (e.g. å‘¨æ°ä¼¦)
-            // But if it has normal Chinese characters, return directly
-            if (!containsSuspiciousLatin1(trimmed)) {
-                return trimmed
-            }
-        }
+        // Re-encoding arbitrary Unicode through Latin-1 is lossy. Only inspect
+        // strings that can be represented by the original single-byte decoder.
+        if (trimmed.any { it.code > 0xFF } || !containsSuspiciousLatin1(trimmed)) return trimmed
 
-        // Check if there are extended ASCII / Latin-1 bytes misread
-        if (containsSuspiciousLatin1(trimmed)) {
-            // U+00D8 LATIN CAPITAL LETTER O WITH STROKE (Ø) is valid Unicode,
-            // not a mojibake marker. Interpreting its single Latin-1 byte as
-            // the lead byte of GBK can turn the following "N" into a CJK glyph
-            // (e.g. OBLIVIØN -> OBLIVI豐) and split otherwise identical albums.
-            val textWithoutKnownLatinLetters = trimmed
-                .replace("Ø", "")
-                .replace("ø", "")
-            if (!containsSuspiciousLatin1(textWithoutKnownLatinLetters)) return trimmed
+        val bytes = trimmed.toByteArray(CHARSET_ISO_8859_1)
+        val utf8Str = String(bytes, CHARSET_UTF_8)
+        if (!utf8Str.contains('\uFFFD') && hasCjk(utf8Str)) return utf8Str
 
-            try {
-                val bytes = trimmed.toByteArray(CHARSET_ISO_8859_1)
-
-                // 1. Try UTF-8 first
-                val utf8Str = String(bytes, CHARSET_UTF_8)
-                if (!utf8Str.contains('\uFFFD') && hasCjk(utf8Str)) {
-                    return utf8Str
-                }
-
-                // 2. Try GB18030 / GBK
-                val gbkStr = String(bytes, CHARSET_GB18030)
-                if (!gbkStr.contains('\uFFFD') && hasCjk(gbkStr)) {
-                    return gbkStr
-                }
-            } catch (ignored: Exception) {
-            }
+        // Latin letters such as ã and Ø are valid metadata. GBK byte sequences
+        // are ambiguous with them, so only attempt repair when C1 controls make
+        // the original text clearly suspicious.
+        if (trimmed.any { it in '\u0080'..'\u009F' }) {
+            val gbkStr = String(bytes, CHARSET_GB18030)
+            if (!gbkStr.contains('\uFFFD') && hasCjk(gbkStr)) return gbkStr
         }
 
         return trimmed

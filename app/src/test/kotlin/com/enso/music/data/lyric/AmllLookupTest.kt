@@ -138,6 +138,22 @@ class AmllLookupTest {
     private val emptySearch = HttpResult.Success(200, """{"data":{"items":[]}}""")
 
     @Test
+    fun searchesAccentedTitleAndFetchesDatabaseResult() = runBlocking {
+        val server = FakeServer { url ->
+            when {
+                url.contains("/v1/lyrics/get?id=2211533994720664") ->
+                    HttpResult.Success(200, org.json.JSONObject().put("data", org.json.JSONObject().put("lyrics", ttml)).toString())
+                url.contains("musicName=S%C3%A3o+Paulo") ->
+                    HttpResult.Success(200, """{"data":{"items":[{"id":2211533994720664}]}}""")
+                else -> HttpResult.Miss(404)
+            }
+        }
+        val outcome = AmllLookup(server.fetch, budget()).run("São Paulo", "The Weeknd", "Hurry Up Tomorrow", 301_623)
+        assertEquals(LookupOutcome.Found(ttml), outcome)
+        assertEquals(2, server.calls.size)
+    }
+
+    @Test
     fun allEmptyAnswersYieldNotFoundWithoutDuplicates() = runBlocking {
         val server = FakeServer { emptySearch }
         // Title with brackets and trailing punctuation exercises every strategy.
