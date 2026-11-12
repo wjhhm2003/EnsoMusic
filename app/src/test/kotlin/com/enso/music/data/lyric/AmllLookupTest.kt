@@ -144,13 +144,46 @@ class AmllLookupTest {
                 url.contains("/v1/lyrics/get?id=2211533994720664") ->
                     HttpResult.Success(200, org.json.JSONObject().put("data", org.json.JSONObject().put("lyrics", ttml)).toString())
                 url.contains("musicName=S%C3%A3o+Paulo") ->
-                    HttpResult.Success(200, """{"data":{"items":[{"id":2211533994720664}]}}""")
+                    HttpResult.Success(200, """{"data":{"items":[{"id":2211533994720664,"musicNames":["São Paulo (feat. Anitta)"],"artistNames":["The Weeknd","Anitta"]}]}}""")
                 else -> HttpResult.Miss(404)
             }
         }
         val outcome = AmllLookup(server.fetch, budget()).run("São Paulo", "The Weeknd", "Hurry Up Tomorrow", 301_623)
         assertEquals(LookupOutcome.Found(ttml), outcome)
         assertEquals(2, server.calls.size)
+    }
+
+    @Test
+    fun rejectsSameTitleByDifferentArtistAndAcceptsCorrectCollaborator() = runBlocking {
+        val server = FakeServer { url ->
+            if (url.contains("/v1/lyrics/get?id=2")) {
+                HttpResult.Success(200, org.json.JSONObject().put("data", org.json.JSONObject().put("lyrics", ttml)).toString())
+            } else if (url.contains("/v1/lyrics/search")) {
+                HttpResult.Success(200, """{"data":{"items":[
+                    {"id":1,"musicNames":["离开后别对我好","Let Go"],"artistNames":["原子邦妮"]},
+                    {"id":2,"musicNames":["Let Go"],"artistNames":["SpiderMan","Guest"]}
+                ]}}""")
+            } else HttpResult.Miss(404)
+        }
+        assertEquals(LookupOutcome.Found(ttml), AmllLookup(server.fetch, budget()).run("Let Go", "spiderman", "", 0))
+        assertFalse(server.calls.any { it.contains("id=1") })
+    }
+
+    @Test
+    fun missingOrWrongArtistCannotMatchEvenOnTitleOnlySearch() = runBlocking {
+        val server = FakeServer { url ->
+            if (url.contains("/v1/lyrics/search")) HttpResult.Success(200,
+                """{"data":{"items":[{"id":1,"musicNames":["Let Go"],"artistNames":["原子邦妮"]},{"id":2,"musicNames":["Let Go"]}]}}""")
+            else HttpResult.Miss(404)
+        }
+        assertEquals(LookupOutcome.NotFound, AmllLookup(server.fetch, budget()).run("Let Go", "spiderman", "", 0))
+        assertFalse(server.calls.any { it.contains("/v1/lyrics/get") })
+    }
+
+    @Test
+    fun lrcFallbackMustMatchMetadata() {
+        val body = org.json.JSONObject().put("trackName", "Let Go").put("artistName", "原子邦妮").put("lyrics", ttml).toString()
+        assertNull(AmllResponseParsing.extractLrcLibTtml(body, "Let Go", "spiderman"))
     }
 
     @Test
@@ -207,7 +240,7 @@ class AmllLookupTest {
                 first -> { first = false; HttpClassifier.classifyStatus(500) }
                 url.contains("/v1/lyrics/get?id=") ->
                     HttpResult.Success(200, org.json.JSONObject().put("data", org.json.JSONObject().put("lyrics", ttml)).toString())
-                else -> HttpResult.Success(200, """{"data":[{"id":"7"}]}""")
+                else -> HttpResult.Success(200, """{"data":[{"id":"7","musicNames":["Song"],"artistNames":["Artist"]}]}""")
             }
         }
         val outcome = AmllLookup(server.fetch, budget()).run("Song", "Artist", "", 0)
@@ -220,7 +253,7 @@ class AmllLookupTest {
             when {
                 url.contains("/v1/lyrics/get?id=42") ->
                     HttpResult.Success(200, org.json.JSONObject().put("data", org.json.JSONObject().put("ttml", ttml)).toString())
-                url.contains("/v1/lyrics/search") -> HttpResult.Success(200, """{"data":{"items":[{"id":"42"}]}}""")
+                url.contains("/v1/lyrics/search") -> HttpResult.Success(200, """{"data":{"items":[{"id":"42","musicNames":["Song"],"artistNames":["Artist"]}]}}""")
                 else -> HttpResult.Miss(404)
             }
         }

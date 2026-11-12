@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
 import com.enso.music.data.entity.SongEntity
+import com.enso.music.data.util.ArtistParser
 import com.enso.music.data.lyric.model.LyricData
 import com.enso.music.data.lyric.parser.TtmlParser
 import kotlinx.coroutines.CancellationException
@@ -47,7 +48,7 @@ class AmllLyricRepository(private val context: Context) {
     }
 
     private val ttmlCacheDir: File by lazy {
-        File(context.filesDir, "ttml_cache").apply {
+        File(context.filesDir, "ttml_cache_v2").apply {
             if (!exists()) mkdirs()
         }
     }
@@ -278,7 +279,7 @@ class AmllLyricRepository(private val context: Context) {
     }
 
     private fun generateSongKey(song: SongEntity): String {
-        return "${song.title}_${song.artist}_${song.duration / 1000}"
+        return "v2_${song.title}_${song.artist}_${song.duration / 1000}"
     }
 
     private fun hashString(input: String): String {
@@ -430,7 +431,7 @@ internal object AmllResponseParsing {
      * @throws JSONException if the body isn't a JSON object (e.g. captive portal page).
      * A valid JSON object without a recognised items array yields an empty list.
      */
-    fun selectCandidates(jsonResponse: String, songDurationMs: Long): List<AmllCandidate> {
+    fun selectCandidates(jsonResponse: String, songDurationMs: Long, title: String? = null, artist: String? = null): List<AmllCandidate> {
         val rootObj = JSONObject(jsonResponse)
         val dataArray: JSONArray = rootObj.optJSONArray("data")
             ?: rootObj.optJSONObject("data")?.optJSONArray("items")
@@ -441,6 +442,7 @@ internal object AmllResponseParsing {
         val result = ArrayList<AmllCandidate>()
         for (i in 0 until dataArray.length()) {
             val item = dataArray.optJSONObject(i) ?: continue
+            if (title != null && !matchesSong(item, title, artist.orEmpty())) continue
             val itemDuration = item.optInt("duration", 0)
             if (localDurationSec > 0 && itemDuration > 0 &&
                 abs(localDurationSec - itemDuration) > DURATION_TOLERANCE_SEC
@@ -457,6 +459,33 @@ internal object AmllResponseParsing {
         return result
     }
 
+    private fun normalized(value: String): String =
+        java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFKC)
+            .lowercase(java.util.Locale.ROOT).filter { it.isLetterOrDigit() }
+
+    private fun names(obj: JSONObject, arrayKey: String, vararg stringKeys: String): List<String> {
+        val array = obj.optJSONArray(arrayKey)
+        val result = mutableListOf<String>()
+        if (array != null) for (i in 0 until array.length()) {
+            val value = array.optString(i, "")
+            if (value.isNotBlank()) result.add(value)
+        }
+        for (key in stringKeys) obj.optString(key, "").takeIf { it.isNotBlank() }?.let(result::add)
+        return result
+    }
+
+    fun matchesSong(obj: JSONObject, title: String, artist: String): Boolean {
+        val expectedTitle = normalized(AmllLookup.cleanSearchKeyword(title))
+        val expectedArtists = ArtistParser.parse(artist)
+            .filterNot { it == "未知歌手" }.map(::normalized).filter { it.isNotEmpty() }.toSet()
+        if (expectedTitle.isEmpty() || expectedArtists.isEmpty()) return false
+        val titleMatches = names(obj, "musicNames", "trackName", "name")
+            .any { normalized(AmllLookup.cleanSearchKeyword(it)) == expectedTitle }
+        val artistMatches = names(obj, "artistNames", "artistName")
+            .flatMap { ArtistParser.parse(it) }.map(::normalized).any { it in expectedArtists }
+        return titleMatches && artistMatches
+    }
+
     /** @throws JSONException if the body isn't a JSON object. */
     fun extractDetailTtml(jsonResponse: String): String? {
         val obj = JSONObject(jsonResponse)
@@ -464,7 +493,10 @@ internal object AmllResponseParsing {
     }
 
     /** @throws JSONException if the body isn't a JSON object. */
-    fun extractLrcLibTtml(jsonResponse: String): String? = extractTtml(JSONObject(jsonResponse))
+    fun extractLrcLibTtml(jsonResponse: String, title: String, artist: String): String? {
+        val obj = JSONObject(jsonResponse)
+        return if (matchesSong(obj, title, artist)) extractTtml(obj) else null
+    }
 
     fun extractTtml(obj: JSONObject): String? {
         val text = obj.optString("lyrics", "").ifBlank {
@@ -513,6 +545,8 @@ internal class AmllLookup(
             val plan = ArrayList<AmllSearchQuery>()
             // Strategy 1: Exact raw title + main artist (+ album)
             plan.add(AmllSearchQuery(rawTitle, rawArtist, rawAlbum))
+            // Search without album before relaxing the artist constraint.
+            if (rawAlbum.isNotBlank()) plan.add(AmllSearchQuery(rawTitle, rawArtist, ""))
             // Strategy 2: Raw title only (artist spelling may differ)
             if (rawArtist.isNotBlank() && rawArtist != UNKNOWN_ARTIST) {
                 plan.add(AmllSearchQuery(rawTitle, "", ""))
@@ -581,7 +615,7 @@ internal class AmllLookup(
         log("Searching AMLL for '${title.trim()}' with ${plan.size} search strategies")
         for ((index, query) in plan.withIndex()) {
             log("Strategy ${index + 1}: '${query.title}' / '${query.artist}' / '${query.album}'")
-            executeSearch(query, durationMs)?.let { return it }
+            executeSearch(query, durationMs, title, artist)?.let { return it }
         }
 
         // Strategy 6: LrcLib compatibility fallback (cleaned keywords)
@@ -589,12 +623,12 @@ internal class AmllLookup(
         val cleanArtist = cleanSearchKeyword(mainArtist(artist))
         val cleanAlbum = cleanSearchKeyword(album.trim())
         val body = requestBody(lrcLibUrl(cleanTitle, cleanArtist, cleanAlbum, durationMs)) ?: return null
-        return parseOrAbort("lrclib") { AmllResponseParsing.extractLrcLibTtml(body) }
+        return parseOrAbort("lrclib") { AmllResponseParsing.extractLrcLibTtml(body, title, artist) }
     }
 
-    private suspend fun executeSearch(query: AmllSearchQuery, durationMs: Long): String? {
+    private suspend fun executeSearch(query: AmllSearchQuery, durationMs: Long, title: String, artist: String): String? {
         val body = requestBody(searchUrl(query)) ?: return null
-        val candidates = parseOrAbort("search") { AmllResponseParsing.selectCandidates(body, durationMs) }
+        val candidates = parseOrAbort("search") { AmllResponseParsing.selectCandidates(body, durationMs, title, artist) }
         for (candidate in candidates) {
             when (candidate) {
                 is AmllCandidate.Inline -> return candidate.ttml

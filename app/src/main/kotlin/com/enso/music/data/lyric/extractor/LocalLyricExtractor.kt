@@ -16,7 +16,7 @@ import java.security.MessageDigest
 class LocalLyricExtractor(private val context: Context) {
 
     private val ttmlCacheDir: File by lazy {
-        File(context.filesDir, "ttml_cache").apply {
+        File(context.filesDir, "ttml_cache_v2").apply {
             if (!exists()) mkdirs()
         }
     }
